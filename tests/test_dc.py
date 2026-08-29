@@ -127,11 +127,17 @@ def test_susceptance_matrix_is_symmetric_with_zero_row_sums(case):
     行和がゼロなのは「全母線を同じ位相にすれば潮流が流れない」ことの
     行列表現である。位相の絶対値に意味がないので、slack の行と列を
     落とさないと解けない。
+
+    特異性は最小特異値を最大特異値との**比**で見る。行列式の絶対値で
+    見ると、成分が O(10) の 9x9 行列では特異でも丸めだけで
+    :math:`\varepsilon \cdot \sigma_1^{n-1} \sim 10^{-8}` 前後の値になり、
+    BLAS の実装（OS）次第で通ったり落ちたりする（Windows の CI で実測）。
     """
     B = susceptance_matrix(case)
     assert np.abs(B - B.T).max() < 1e-12
     assert np.abs(B.sum(axis=1)).max() < 1e-12
-    assert abs(np.linalg.det(B)) < 1e-8
+    singular_values = np.linalg.svd(B, compute_uv=False)
+    assert singular_values[-1] < 1e-12 * singular_values[0]
 
 
 def test_susceptance_matrix_off_diagonal_is_minus_one_over_x(case):
