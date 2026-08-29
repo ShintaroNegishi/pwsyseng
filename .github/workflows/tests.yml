@@ -1,0 +1,130 @@
+# 3 つの OS で environment.yml から環境を作り、テストを走らせる。
+#
+# 学生の PC（特に Windows）で環境構築が通るかどうかを、教員が手元に
+# Windows 機を持っていなくても継続的に確認できるようにするのが狙い。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: テスト (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash -el {0}   # conda を有効にするために必要
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: conda 環境を作る
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pwsyseng
+          miniforge-version: latest
+          auto-activate-base: false
+
+      - name: pwsyseng をインストール
+        run: pip install -e .
+
+      - name: 依存パッケージの確認
+        run: |
+          python -c "import sys; print('Python  ', sys.version.split()[0])"
+          python -c "import numpy, scipy, control; print('control ', control.__version__)"
+          python -c "import slycot; print('slycot  ', slycot.__version__)"
+          python -c "import pulp; print('pulp    ', pulp.__version__)"
+          python -c "import genstab; print('genstab ', genstab.__version__)"
+          python -c "import gridops; print('gridops ', gridops.__version__)"
+
+      - name: CBC が使えることを確認する
+        # ここが通らなければ起動停止計画の回が丸ごと動かない。
+        # 学生の環境で最も詰まりやすい箇所なので、独立したステップにしている。
+        run: |
+          python - <<'PY'
+          import pulp
+          available = pulp.listSolvers(onlyAvailable=True)
+          print("使えるソルバ:", available)
+          if not ({"COIN_CMD", "PULP_CBC_CMD"} & set(available)):
+              raise SystemExit(
+                  "CBC が見つからない。environment.yml の coin-or-cbc を確認すること。"
+              )
+          PY
+
+      - name: 同梱ケースの整合性を確認する
+        run: python tools/check_case.py
+
+      - name: テスト
+        run: pytest -q
+
+      - name: doctest
+        run: |
+          pytest --doctest-modules -q \
+            src/genstab/__init__.py \
+            src/genstab/linearize.py \
+            src/genstab/smallsignal.py \
+            src/genstab/machines/classical.py \
+            src/gridops/__init__.py \
+            src/gridops/case.py
+
+  notebooks:
+    name: notebook の実行確認
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: conda 環境を作る
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pwsyseng
+          miniforge-version: latest
+          auto-activate-base: false
+
+      - name: pwsyseng をインストール
+        run: pip install -e .
+
+      - name: notebook を再生成する
+        run: python tools/build_notebooks.py
+
+      - name: すべての notebook を実行する
+        env:
+          MPLBACKEND: Agg
+          GRIDOPS_FAST: "1"     # モンテカルロの試行数を落として CI を短くする
+        run: |
+          mkdir -p /tmp/nbexec
+          executed=0
+          broken=0
+          for nb in notebooks/*.ipynb; do
+            name=$(basename "$nb")
+            log="/tmp/nbexec/${name}.log"
+            executed=$((executed + 1))
+            if jupyter nbconvert --to notebook --execute --output-dir=/tmp/nbexec "$nb" > "$log" 2>&1; then
+              echo "OK      $name"
+            else
+              echo "FAILED  $name"
+              tail -40 "$log"
+              broken=$((broken + 1))
+            fi
+          done
+          echo "----------------------------------------"
+          echo "実行した notebook: ${executed} 件 / 失敗: ${broken} 件"
+          if [ "$broken" -gt 0 ]; then
+            echo "notebook の実行に失敗した。"
+            exit 1
+          fi
+          if [ "$executed" -eq 0 ]; then
+            echo "notebook が 1 件も実行されていない。glob を確認すること。"
+            exit 1
+          fi
+          echo "すべての notebook が正常に実行された。"

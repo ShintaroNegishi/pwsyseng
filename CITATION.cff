@@ -1,0 +1,38 @@
+# 引用情報。GitHub がこのファイルを読んで「Cite this repository」を表示する。
+cff-version: 1.2.0
+title: "pwsyseng: 電力システム工学のシミュレーション教材"
+message: "このソフトウェアを利用した場合は、以下の情報で引用してください。"
+type: software
+authors:
+  - family-names: "Negishi"
+    given-names: "Shintaro"
+    affiliation: "Kanagawa University"
+repository-code: "https://github.com/ShintaroNegishi/pwsyseng"
+abstract: >-
+  電力システム工学の講義・自習用 Python 教材。潮流計算・経済負荷配分・
+  発電機起動停止計画・アデカシーとセキュリティ（gridops）と、発電機の
+  過渡安定度・定態安定度・AVR/ガバナ/PSS 制御（genstab）を、1 つの
+  標準系統（WSCC 3 機 9 母線）の上で一貫して扱う。自分で解いた潮流解を
+  そのまま過渡安定度計算に渡せるため、計画から事故時の挙動までが
+  1 本の線でつながる。混合整数計画には商用ソルバを使わず、学生の手元で
+  確実に動く PuLP と CBC を用いる。
+keywords:
+  - power system engineering
+  - power flow
+  - economic dispatch
+  - unit commitment
+  - power system reliability
+  - transient stability
+  - small-signal stability
+  - engineering education
+license: MIT
+version: 0.1.0
+date-released: "2026-08-29"
+references:
+  - type: software
+    title: "genstab: 同期発電機の安定性シミュレーション教材"
+    authors:
+      - family-names: "Negishi"
+        given-names: "Shintaro"
+    repository-code: "https://github.com/ShintaroNegishi/genstab"
+    notes: "本教材の安定度パート（src/genstab）の由来となった単体パッケージ。"

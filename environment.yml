@@ -1,0 +1,39 @@
+# pwsyseng 授業用環境
+#
+# 学生・教員ともにこのファイル 1 つで同じ環境を作る。
+#
+#   conda env create -f environment.yml
+#   conda activate pwsyseng
+#   pip install -e .
+#
+# 環境が分かれると「手元では動くのに」という問題の切り分けに時間を取られる
+# ので、全員が pwsyseng という同じ名前の環境を使う運用にしている。
+# Windows での Anaconda の導入手順は、別途配布する導入ドキュメントを参照すること。
+#
+# pulp と coin-or-cbc は起動停止計画の混合整数計画に使う。conda-forge の
+# pulp は CBC のバイナリを同梱しないので、coin-or-cbc を明示的に並べている
+# （詳細と動かないときの切り分けは docs/solver_notes.md）。商用ソルバは
+# 使わない。学生の手元でライセンスの問題を起こさないことを最優先している。
+#
+# slycot は conda-forge にビルド済みバイナリがあり、Windows でも conda 経由
+# なら問題なく入る（pip でのビルドは Fortran が必要で失敗しやすいので使わない
+# こと）。python-control の全機能（place_varga など）を使うために入れている。
+name: pwsyseng
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - pulp
+  - coin-or-cbc
+  - control
+  - slycot
+  - sympy
+  - pyyaml
+  - jupyterlab
+  - ipywidgets
+  - nbformat
+  - pytest

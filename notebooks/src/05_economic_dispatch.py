@@ -1,0 +1,300 @@
+# %% [markdown]
+# # 05 経済負荷配分 — 同じ需要をいくらで作るか
+#
+# ## この回のねらい
+#
+# - 燃料費 $C(P)$ と **増分燃料費** $dC/dP$ を区別し、最適配分の条件が「限界費用が揃う」の 1 行に凝縮されること、
+#   上下限があるとその等号が **不等式**に化けること（KKT）を確かめる
+# - $\sum_i P_i(\lambda)$ の単調性が二分法を保証することを、自分で書いて確かめる
+# - 送電損失を入れると何が変わるかを、ペナルティファクタで測る
+#
+# 第 01〜04 回で問うていたのは「いま流れている潮流はどうなっているか」でした。発電機の出力は与えられていて、計算
+# するのは電圧と潮流です。この回で初めて **出力そのものを決めます。** 問いは「315 MW をどう作るか」ではなく
+# 「315 MW を **いくらで** 作るか」です。
+#
+# ## 燃料費のモデル
+#
+# 号機 $i$ の燃料費を出力 $P_i$ [MW] の 2 次式 $C_i(P_i) = c_i P_i^2 + b_i P_i + a_i$ [円/h] で表します。
+#
+# $c_i$ が `Unit.quadratic`、$b_i$ が `Unit.var_cost`、$a_i$ が `Unit.noload_cost`（無負荷費 = 並列しているだけで
+# 掛かる費用）です。蒸気タービンの熱効率は定格付近で最良になり部分負荷では落ちるので、1 MWh を追加で作る費用
+# （増分燃料費）$dC_i/dP_i = 2 c_i P_i + b_i$ は出力とともに増えます。$c_i > 0$ すなわち $C_i$ が **凸**である
+# ことが、この回の議論すべてを支えます。
+#
+# > 燃料費はすべて自作の値です（`docs/model_assumptions.md`）。実プラントの値ではありません。
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+
+import gridops
+from gridops.plotting import use_gridops_style, plot_merit_order, plot_lambda_search
+
+use_gridops_style()
+
+case = gridops.load_case("wscc9")
+print(case.describe())
+
+# %% [markdown]
+# ## 1. 費用の形を見る
+#
+# 発電所は 3 つ。石炭の G1（安いが起動が重い）、LNG コンバインドサイクルの G2（中位）、LNG 汽力の G3（高いが
+# ピーク対応）です。代表 1 台ずつ、左に $C(P)$、右に $dC/dP$ を描きます。右図の点線は **全負荷平均費用**
+# $C(P^{max})/P^{max}$（次節の順位づけに使う量）です。
+
+# %%
+sample = [case.units[0], case.units[3], case.units[5]]  # G1-1, G2-1, G3-1
+fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.4))
+for unit, color in zip(sample, ("tab:blue", "tab:orange", "tab:green")):
+    p = np.linspace(unit.p_min_mw, unit.p_max_mw, 200)
+    incremental = np.zeros_like(p)     # 下の TODO を埋めると上書きされる
+    # TODO(L1): 増分燃料費 dC/dP = 2 c P + b を 1 行で書くこと（c=quadratic, b=var_cost）。
+    # BEGIN SOLUTION
+    incremental = 2.0 * unit.quadratic * p + unit.var_cost
+    # END SOLUTION
+    axes[0].plot(p, unit.fuel_cost(p) / 1e6, color=color, lw=2, label=unit.name)
+    axes[1].plot(p, incremental, color=color, lw=2, label=unit.name)
+    axes[1].axhline(unit.full_load_average_cost(), color=color, ls=":", lw=1.2)
+
+axes[0].set_xlabel("Output P [MW]")
+axes[0].set_ylabel("Fuel cost C(P) [million JPY/h]")
+axes[0].set_title("Fuel cost curves")
+axes[1].set_xlabel("Output P [MW]")
+axes[1].set_ylabel("Incremental cost dC/dP [JPY/MWh]")
+axes[1].set_title("Incremental cost (dotted: full-load average cost)")
+for ax in axes:
+    ax.legend()
+plt.tight_layout()
+plt.show()
+print("自作の dC/dP と incremental_cost の一致:", np.allclose(incremental, unit.incremental_cost(p)))
+
+# %% [markdown]
+# **G1-1 だけ、点線が曲線より完全に上にあります。** 増分費用は最大でも 9,440 円/MWh なのに、全負荷平均費用は 10,220
+# 円/MWh。差の 780 円/MWh は $a/P^{max} - c\,P^{max} = 1{,}500 - 720$ から来ます。無負荷費 90,000 円/h を 60 MW で
+# 割った分が上乗せされ、2 次項の分だけ引き戻される。**平均費用と限界費用は違う量です。**
+#
+# ## 2. メリットオーダー
+#
+# 全負荷平均費用の安い順に並べたものをメリットオーダーと呼び、「どの号機を起動するか」（第 07 回）の順位づけに
+# 使います。
+
+# %%
+print(f"{'unit':6s} {'Pmin':>5s} {'Pmax':>5s} {'avg cost':>10s} {'dC/dP at Pmax':>14s}")
+for unit in gridops.merit_order(case):
+    print(f"{unit.name:6s} {unit.p_min_mw:5.0f} {unit.p_max_mw:5.0f} {unit.full_load_average_cost():10.1f}"
+          f" {unit.incremental_cost(unit.p_max_mw):14.1f}")
+
+plot_merit_order(case, demand_mw=315.0)
+plt.show()
+
+# %% [markdown]
+# 需要 315 MW の破線は G2-2 の階段を横切ります。積み上げだけを読むと **「G3 は要らない」**という結論になります。正しいかどうかは等 λ 法の答えと突き合わせてから判断します。
+#
+# ## 3. 最適性条件 — たった 1 行
+#
+# 総費用 $\sum_i C_i(P_i)$ を $\sum_i P_i = D$ のもとで最小化します。ラグランジュ関数
+# $\mathcal{L} = \sum_i C_i(P_i) - \lambda(\sum_i P_i - D)$ を $P_i$ で微分してゼロと置けば、
+#
+# $$ \frac{dC_i}{dP_i} = \lambda \qquad (\text{すべての } i) $$
+#
+# **すべての号機の限界費用が同じ値 $\lambda$ に揃う。** これだけです。号機 A の限界費用が 10,000 円/MWh、B が
+# 12,000 円/MWh なら、B を 1 MW 下げて A を 1 MW 上げれば需給を保ったまま 2,000 円/h 安くなる。**動かして安くなる
+# 余地が無い**状態が限界費用の揃った状態で、$\lambda$ は「需要をあと 1 MW 増やすといくら掛かるか」を意味します。
+#
+# ## 4. 上下限があると等号が不等式に化ける（KKT）
+#
+# 実際の号機には $P_i^{min} \le P_i \le P_i^{max}$ があります。上下限の乗数まで含めた停留条件（KKT 条件）は次の
+# 3 本になります。
+#
+# $$ \frac{dC_i}{dP_i} = \lambda \;\; (P^{min}_i < P_i < P^{max}_i), \qquad
+#    \frac{dC_i}{dP_i} \le \lambda \;\; (P_i = P^{max}_i), \qquad
+#    \frac{dC_i}{dP_i} \ge \lambda \;\; (P_i = P^{min}_i) $$
+#
+# **上限に張り付いた号機は「もっと出したいのに出せない」ので限界費用が $\lambda$ より安く、下限の号機は「止めたい
+# のに止められない」ので $\lambda$ より高い。** 等 λ 法という名前から全機が揃うと思い込むのが最も多い誤解で、
+# 揃うのはどちらにも張り付いていない **限界機**だけです。
+
+# %%
+result = gridops.economic_dispatch(case, 315.0)
+print(result.summary(), "\n")
+
+for unit in case.units:
+    p = result.dispatch[unit.name]
+    state, relation = "?", "?"          # 下の TODO を埋めると上書きされる
+    # TODO(L2): 出力 p が上限・下限・その中間のどれかを判定して、state に
+    #           "at Pmax" / "at Pmin" / "marginal" を、relation に λ との
+    #           大小関係 "<=" / ">=" / "==" を入れること（余裕は 1e-9）。
+    # BEGIN SOLUTION
+    if p > unit.p_max_mw - 1e-9:
+        state, relation = "at Pmax", "<="
+    elif p < unit.p_min_mw + 1e-9:
+        state, relation = "at Pmin", ">="
+    else:
+        state, relation = "marginal", "=="
+    # END SOLUTION
+    print(f"  {unit.name:6s} P = {p:7.3f} MW  {state:8s}  dC/dP = {unit.incremental_cost(p):9.1f} {relation} lambda")
+
+# G3 を止めたらいくら安いのか（メリットオーダーの読みの検算）。
+off = gridops.economic_dispatch(case, 315.0, committed=[u.name for u in case.units[:5]])
+print(f"\n7 台起動 {result.total_cost:12.1f} 円/h / G3 解列 {off.total_cost:12.1f} 円/h"
+      f" / 差 {result.total_cost - off.total_cost:10.1f} 円/h")
+
+# %% [markdown]
+# $\lambda = 13{,}090$ 円/MWh に対し、G1 の 3 台は上限 60 MW で 9,440〜9,640 円/MWh（$\le \lambda$）、G3 の
+# 2 台は下限 15 MW で 20,600〜21,100 円/MWh（$\ge \lambda$）。揃っているのは G2 の 2 台だけです。
+#
+# メリットオーダーの「G3 は要らない」は半分正しく、半分間違いでした。**起動している号機は最低出力を割れない**ので、
+# 等 λ 法は G3 を 15 MW ずつ動かします。止めれば 1 時間あたり 270,200 円安い。ところが解列には起動費（G3 は
+# 120,000 円/回）と最低停止時間が伴い、1 時間だけを見て決められません — これが第 07 回の主題です。
+#
+# ## 5. $\lambda$ をどう見つけるか — 二分法
+#
+# 最適性条件を $P_i$ について解くと、出力は $\lambda$ の関数として
+# $P_i(\lambda) = \mathrm{clip}((\lambda - b_i)/2c_i,\; P_i^{min},\; P_i^{max})$ と書けます。$c_i > 0$ なら
+# $P_i(\lambda)$ は単調非減少、したがって $\sum_i P_i(\lambda)$ も **単調非減少**で、水平線 $D$ との交点は二分法で
+# 必ず挟み込めます。ニュートン法を使わないのは上下限に張り付く点で微分が折れるからで、**単調性さえあれば二分法は
+# 必ず当たります。**
+
+# %%
+def output_at(unit, lam):
+    """λ における号機の最適出力 [MW]。"""
+    p = (lam - unit.var_cost) / (2.0 * unit.quadratic)
+    return min(max(p, unit.p_min_mw), unit.p_max_mw)
+
+
+def my_lambda_search(units, demand_mw, n_iter=80):
+    """λ の二分法。ブラケットは全機下限 / 全機上限になる λ から取る。"""
+    lo = min(u.var_cost for u in units)
+    hi = max(u.var_cost + 2.0 * u.quadratic * u.p_max_mw for u in units)
+    for _ in range(n_iter):
+        mid = 0.5 * (lo + hi)
+        total = sum(output_at(u, mid) for u in units)
+        # TODO(L2): total と demand_mw を比べて、lo と hi のどちらを mid に
+        #           更新するか決めること（ΣP(λ) は単調非減少）。
+        # BEGIN SOLUTION
+        if total < demand_mw:
+            lo = mid
+        else:
+            hi = mid
+        # END SOLUTION
+    return 0.5 * (lo + hi)
+
+
+mine = my_lambda_search(case.units, 315.0)
+print(f"自作の二分法 : lambda = {mine:.6f} 円/MWh")
+print(f"ライブラリ   : lambda = {result.lam:.6f} 円/MWh (差 {abs(mine - result.lam):.2e})")
+print(f"合計出力     : {sum(output_at(u, mine) for u in case.units):.6f} MW")
+
+# %% [markdown]
+# ## 6. 需要を範囲の外に置く
+#
+# $\sum_i P_i(\lambda)$ が届くのは $[\sum P^{min}, \sum P^{max}] = [174, 460]$ MW だけで、この外に需要を置くと交点は
+# **存在しません。** ところが二分法は交点の有無を知りません。区間を半分にし続け、幅が許容差を下回った時点で「収束
+# した」と報告します。返る $\lambda$ はブラケットの端に張り付いた無意味な値で、$\sum P \ne D$ のまま下流へ流れて
+# いく。**収束したふりが最も見つけにくい故障です。** だから二分法より **先に**範囲を検査します。
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.4))
+plot_lambda_search(case, 315.0, ax=axes[0])
+plot_lambda_search(case, 500.0, ax=axes[1])
+plt.tight_layout()
+plt.show()
+
+for demand in (500.0, 150.0):
+    try:
+        gridops.economic_dispatch(case, demand)
+    except ValueError as error:
+        print(f"--- demand = {demand} MW ---\n{error}\n")
+
+# %% [markdown]
+# 右の図で需要の破線が階段の天井より上にあること、それがそのまま例外の内容です。階段の平らな部分
+# （$\lambda \approx 9{,}700$〜$12{,}600$）では需要が少し変わるだけで $\lambda$ が大きく飛びます。G1 が上限に
+# 達してから G2 が下限を離れるまで、動かせる号機が 1 台も無いからです。
+#
+# ## 7. 送電損失とペナルティファクタ
+#
+# ここまで $\sum P_i = D$ と書いてきましたが、第 04 回で見たとおり基準ケースでは 0.046410 p.u. = **4.641 MW** が
+# 線路で熱になっています。正しい需給の式は $\sum_i P_i = D + P_{loss}(P)$ で、損失は出力の関数です。最適性条件は
+#
+# $$ L_i \frac{dC_i}{dP_i} = \lambda, \qquad L_i = \frac{1}{1 - \partial P_{loss}/\partial P_i} $$
+#
+# に変わります。$L_i$ が **ペナルティファクタ**で、増分損失が正なら $L_i > 1$、実効的な限界費用が押し上げられて
+# 出力が減ります。増分損失は **slack 母線を基準に測る**ので、slack（母線 1）では定義により $L_1 = 1$ です。
+#
+# ここで実験を 1 つ。**同じ系統・同じ 315 MW** について、第 04 回までの参照解と、たったいま求めた経済配分の
+# 2 つの運転点で $L_i$ を測り比べます。
+
+# %%
+base = gridops.solve_powerflow(case)
+econ = gridops.solve_powerflow(case, dispatch=result.dispatch)
+L_base = gridops.penalty_factors(case, base)
+L_econ = gridops.penalty_factors(case, econ)
+
+for tag, f in (("reference", base), ("economic", econ)):
+    print(f"{tag:10s}: bus-1 gen = {case.to_mw(f.slack_power.real):6.1f} MW, losses = {case.to_mw(f.losses):.3f} MW")
+print(f"\n{'bus':>4s} {'dPloss/dP (ref)':>16s} {'L (ref)':>9s} {'dPloss/dP (econ)':>17s} {'L (econ)':>9s}")
+for bus in (1, 2, 3):
+    print(f"{bus:>4d} {1 - 1 / L_base[bus]:16.4f} {L_base[bus]:9.4f} "
+          f"{1 - 1 / L_econ[bus]:17.4f} {L_econ[bus]:9.4f}")
+
+# %% [markdown]
+# ### あっ、と思うところ
+#
+# **母線 2 のペナルティファクタが 1.0478 から 0.9925 へひっくり返ります。** 参照解では「母線 2 で 1 MW 増やすと損失が 0.046 MW
+# 増える」ので G2 は罰せられ、経済配分では「同じことをすると 0.008 MW **減る**」ので報われます。系統も需要も変えていません。
+# 変えたのは運転点だけです。参照解では母線 1 が 71.6 MW しか出さず母線 2 が 163 MW を担っていたのに対し、経済配分では G1 の 3 台が
+# 上限の計 180 MW（slack なので潮流解では 183.0 MW）。母線 4 が 3 つの負荷のほぼ中央にあるので、この状態では母線 1 から先へ送る
+# ほうが遠回りになるのです。損失も 4.641 MW から **3.000 MW へ減りました。**
+#
+# **ペナルティファクタは系統の性質ではなく運転点の性質です。** 損失は出力の関数、出力は損失の関数。だから `dispatch_with_losses` は「λ 法を解く → 交流潮流を解き直して $L_i$ を更新する」を繰り返す不動点反復です。
+
+# %%
+loss_result = gridops.dispatch_with_losses(case, 315.0)
+print(loss_result.summary())
+print(f"  外側の反復 {loss_result.iterations} 回 / L(G2-1) = {loss_result.penalty['G2-1']:.5f} / "
+      f"G2-1 の増分費用 = lambda / L = {loss_result.lam / loss_result.penalty['G2-1']:.2f} 円/MWh\n")
+
+# 「L を完全に無視して、需要に損失を足しただけ」の計算と比べる。
+naive = gridops.economic_dispatch(case, 315.0 + loss_result.losses_mw)
+print(f"{'unit':6s} {'no loss':>9s} {'with loss':>10s} {'delta':>8s} {'D+Ploss only':>13s}")
+for unit in case.units:
+    p0, p1 = result.dispatch[unit.name], loss_result.dispatch[unit.name]
+    print(f"{unit.name:6s} {p0:9.3f} {p1:10.3f} {p1 - p0:+8.3f} {naive.dispatch[unit.name]:13.3f}")
+print(f"\nlambda: 損失込み {loss_result.lam:.2f} / L を無視 {naive.lam:.2f} 円/MWh")
+
+# TODO(L3): 損失を入れると配分はどう動いたか。次の 3 点を説明すること。
+#   (a) 系統 λ は 13,090 -> 13,037 円/MWh と **下がった**のに、G2-1 自身の増分費用は 13,090 -> 13,114 円/MWh と
+#       上がっている。矛盾しないのはなぜか。
+#   (b) 動いたのは G2 の 2 台だけで、増分の合計はちょうど損失 2.980 MW に等しい。G1 と G3 はなぜ動かないのか。
+#   (c) 右端の「L を無視して D + P_loss だけで解いた」列が一致してしまうのはなぜか。どういう場合なら一致しなく
+#       なるか、号機データのどこを変えれば起こるかまで答えること。
+
+# %% [markdown]
+# ### L3 の模範解答
+#
+# **(a)** $\lambda$ は号機の増分費用ではなく $L_i \, dC_i/dP_i$ です。$L_{G2} = 0.99416 < 1$ なので
+# $\lambda = 0.99416 \times 13{,}114 = 13{,}037$。号機から見た費用は上がり（1.49 MW ずつ余分に発電している）、系統
+# から見た価格は下がる。**基準点（slack）を変えれば $\lambda$ も変わる**ので、絶対値だけを他ケースと比べないこと。
+#
+# **(b)** G1 は上限、G3 は下限に張り付き、KKT の不等式に余裕があります（$9{,}440 \ll 13{,}037 \ll 20{,}600$）。損失
+# 3 MW 程度で $\lambda$ が動いても不等式は破れず、限界機の G2 だけが差を吸収します。
+#
+# **(c)** ペナルティファクタが **配分**を動かすのは、$L_i$ の違う母線の号機が **同時に限界的**なときだけです。ここ
+# では限界機が母線 2 の 2 台しかなく、2 台は同じ $L$ を共有するので、$L$ は $\lambda$ の値だけを変えて配分を変え
+# ません。配分が動いたのは「需要 + 損失」が増えたからです。G3 の `var_cost` を 12,000 円/MWh 付近まで下げて G2 と
+# 増分費用の帯を重ねれば、$L_{G2} = 0.994$ と $L_{G3} = 0.983$ の差が効き、母線 3 の号機が多めに配分されます。
+# **同梱データは発電所ごとの増分費用の帯が重ならないように作ってあるので、この系統では $L$ の効果が $\lambda$ に
+# しか出ません。** 教材の性質であって一般の性質ではありません。なお実装は B 係数法 $P_{loss} = \sum B_{ij}P_iP_j$ を
+# 使わず、基準潮流解のまわりで損失を **数値微分**しています。
+#
+# ## まとめ
+#
+# - 燃料費が凸なら最適配分は **限界費用が揃うこと**に凝縮される。ただし張り付いた号機では等号が不等式に化け、揃うのは限界機だけ
+# - $\sum P_i(\lambda)$ の単調性が二分法を保証する。ただし需要が範囲の外なら交点は無く、**範囲の検査を二分法より
+#   先に置く**ことだけが収束したふりを防ぐ
+# - 損失を入れると $L_i \, dC_i/dP_i = \lambda$。$L_i$ は系統ではなく **運転点**の性質で、不動点反復でしか求まらない
+#
+# ここまで、系統は 1 つの $\lambda$ で価格づけされていました。しかしこの回では線路の存在を損失としてしか見ていま
+# せん。**線路には熱容量があります。** 混雑した線路の向こう側に安い発電機があっても、送れなければ買えない。次の
+# 第 06 回で直流最適潮流に系統制約を入れると、**ひとつだった $\lambda$ が母線ごとに割れます。** それがノード価格
+# （LMP）で、その差が混雑の値段です。

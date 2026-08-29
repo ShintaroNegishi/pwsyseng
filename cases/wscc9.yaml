@@ -1,0 +1,55 @@
+# WSCC 3 機 9 母線系統（Anderson & Fouad の標準例題）
+#
+# 過渡安定性の教材として最も広く使われているベンチマーク系統。
+# 発電機はすべて古典モデルで扱う。
+#
+# 潮流解（各母線の電圧の大きさと位相）は数値として与えている。
+# 本パッケージは潮流計算そのものを対象にしないためで、値の整合性は
+# tests/test_multimachine.py がネットワークデータから検算している。
+#
+# 出典: P. M. Anderson and A. A. Fouad, "Power System Control and
+# Stability", 2nd ed., IEEE Press, 2003, Chapter 2.
+name: WSCC 3-machine 9-bus system
+base_mva: 100.0
+frequency_hz: 60.0
+
+buses:
+  - {id: 1, v: 1.0400, angle_deg:  0.0000}
+  - {id: 2, v: 1.0250, angle_deg:  9.2800}
+  - {id: 3, v: 1.0250, angle_deg:  4.6648}
+  - {id: 4, v: 1.0258, angle_deg: -2.2168}
+  - {id: 5, v: 0.9956, angle_deg: -3.9888}
+  - {id: 6, v: 1.0127, angle_deg: -3.6874}
+  - {id: 7, v: 1.0258, angle_deg:  3.7197}
+  - {id: 8, v: 1.0159, angle_deg:  0.7275}
+  - {id: 9, v: 1.0324, angle_deg:  1.9667}
+
+# r, x: 直列インピーダンス [p.u.] / b: 全充電サセプタンス [p.u.]
+branches:
+  - {from: 1, to: 4, r: 0.0000, x: 0.0576, b: 0.000}   # 変圧器
+  - {from: 2, to: 7, r: 0.0000, x: 0.0625, b: 0.000}   # 変圧器
+  - {from: 3, to: 9, r: 0.0000, x: 0.0586, b: 0.000}   # 変圧器
+  - {from: 4, to: 5, r: 0.0100, x: 0.0850, b: 0.176}
+  - {from: 4, to: 6, r: 0.0170, x: 0.0920, b: 0.158}
+  - {from: 5, to: 7, r: 0.0320, x: 0.1610, b: 0.306}
+  - {from: 6, to: 9, r: 0.0390, x: 0.1700, b: 0.358}
+  - {from: 7, to: 8, r: 0.0085, x: 0.0720, b: 0.149}
+  - {from: 8, to: 9, r: 0.0119, x: 0.1008, b: 0.209}
+
+loads:
+  - {bus: 5, p: 1.25, q: 0.50}
+  - {bus: 6, p: 0.90, q: 0.30}
+  - {bus: 8, p: 1.00, q: 0.35}
+
+generators:
+  - {name: G1, bus: 1, h: 23.64, xd_prime: 0.0608, p: 0.716, q:  0.270, d: 0.0}
+  - {name: G2, bus: 2, h:  6.40, xd_prime: 0.1198, p: 1.630, q:  0.067, d: 0.0}
+  - {name: G3, bus: 3, h:  3.01, xd_prime: 0.1813, p: 0.850, q: -0.109, d: 0.0}
+
+# 母線 7 で三相地絡し、線路 5-7 を開放して除去する標準的なケース。
+fault:
+  t_fault: 1.0
+  t_clear: 1.0833          # 5 サイクル (60 Hz)
+  buses: [7]
+  tripped_branches:
+    - {from: 5, to: 7}
