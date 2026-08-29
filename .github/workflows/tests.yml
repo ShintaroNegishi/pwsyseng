@@ -4,6 +4,12 @@
 # Windows 機を持っていなくても継続的に確認できるようにするのが狙い。
 name: tests
 
+# Windows ランナーの Python は標準出力が cp1252 のことがあり、
+# 日本語（テストの診断メッセージや CI 内の print）を書けずに
+# UnicodeEncodeError で落ちる。全ジョブで UTF-8 を強制する。
+env:
+  PYTHONUTF8: "1"
+
 on:
   push:
     branches: [main]

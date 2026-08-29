@@ -402,13 +402,19 @@ def test_the_free_rotation_mode_sits_at_the_origin(case, solution):
     ``genstab/eac.py`` が実部 > 1e-6 で「定態不安定」と警告するのは
     この原点のモードを拾っているためで、CCT の値そのものは正しい。
     テストで D = 0 を使うときに警告を握りつぶしてよい根拠がこれである。
+
+    許容差 1e-4 は「原点のモードが数値線形化の誤差の範囲にあること」を
+    見るためのもので、プラットフォームに依存する。Linux (x86-64, MKL) では
+    実部は 1e-9 以下に収まるが、macOS (arm64, Accelerate) では中心差分の
+    丸めの積み方が違い、同じコードで 3.3e-5 が観測された（CI の実測）。
+    どちらも「原点にある」という物理的な主張の範囲内である。
     """
     from genstab.smallsignal import analyze
 
     for damping in (0.0, 0.5, 2.0):
         eigenvalues = analyze(to_genstab(case, solution, damping=damping)).eigenvalues
         assert np.abs(eigenvalues).min() < 1e-3, f"D={damping} で原点のモードが無い"
-        assert abs(np.max(eigenvalues.real)) < 1e-6, f"D={damping}"
+        assert abs(np.max(eigenvalues.real)) < 1e-4, f"D={damping}"
     # 振動モードそのものは制動を入れれば確かに左半面へ動く。
     damped = analyze(to_genstab(case, solution, damping=2.0)).eigenvalues
     oscillatory = damped[np.abs(damped.imag) > 1.0]
