@@ -1,12 +1,6 @@
-# 3 つの OS で environment.yml から環境を作り、テストを走らせる。
-#
-# 学生の PC（特に Windows）で環境構築が通るかどうかを、教員が手元に
-# Windows 機を持っていなくても継続的に確認できるようにするのが狙い。
+# 3 つの OS で環境とテストを確認し、主要 notebook は Windows でも実行する。
 name: tests
 
-# Windows ランナーの Python は標準出力が cp1252 のことがあり、
-# 日本語（テストの診断メッセージや CI 内の print）を書けずに
-# UnicodeEncodeError で落ちる。全ジョブで UTF-8 を強制する。
 env:
   PYTHONUTF8: "1"
 
@@ -26,7 +20,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     defaults:
       run:
-        shell: bash -el {0}   # conda を有効にするために必要
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,11 +45,11 @@ jobs:
           python -c "import gridops; print('gridops ', gridops.__version__)"
 
       - name: CBC が使えることを確認する
-        # ここが通らなければ起動停止計画の回が丸ごと動かない。
-        # 学生の環境で最も詰まりやすい箇所なので、独立したステップにしている。
         run: |
           python - <<'PY'
+          import shutil
           import pulp
+          print("cbc executable:", shutil.which("cbc"))
           available = pulp.listSolvers(onlyAvailable=True)
           print("使えるソルバ:", available)
           if not ({"COIN_CMD", "PULP_CBC_CMD"} & set(available)):
@@ -81,8 +75,12 @@ jobs:
             src/gridops/case.py
 
   notebooks:
-    name: notebook の実行確認
-    runs-on: ubuntu-latest
+    name: notebook 実行 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash -el {0}
@@ -100,37 +98,74 @@ jobs:
       - name: pwsyseng をインストール
         run: pip install -e .
 
-      - name: notebook を再生成する
-        run: python tools/build_notebooks.py
+      - name: notebook を再生成し、コミット済み生成物との一致を確認する
+        run: |
+          python tools/build_notebooks.py
+          git diff --exit-code -- notebooks exercises
 
-      - name: すべての notebook を実行する
+      - name: notebook を実行する
         env:
           MPLBACKEND: Agg
-          GRIDOPS_FAST: "1"     # モンテカルロの試行数を落として CI を短くする
+          GRIDOPS_FAST: "1"
         run: |
-          mkdir -p /tmp/nbexec
+          outdir="${RUNNER_TEMP}/nbexec"
+          mkdir -p "$outdir"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            notebooks=(
+              notebooks/00_setup.ipynb
+              notebooks/03_voltage_stability.ipynb
+              notebooks/07_unit_commitment.ipynb
+              notebooks/14_avr_and_damping.ipynb
+              notebooks/15_pss_design.ipynb
+              notebooks/18_adequacy.ipynb
+              notebooks/19_integrated.ipynb
+            )
+          else
+            notebooks=(notebooks/*.ipynb)
+          fi
           executed=0
           broken=0
-          for nb in notebooks/*.ipynb; do
+          for nb in "${notebooks[@]}"; do
             name=$(basename "$nb")
-            log="/tmp/nbexec/${name}.log"
+            log="${outdir}/${name}.log"
             executed=$((executed + 1))
-            if jupyter nbconvert --to notebook --execute --output-dir=/tmp/nbexec "$nb" > "$log" 2>&1; then
+            if jupyter nbconvert --to notebook --execute --output-dir="$outdir" "$nb" > "$log" 2>&1; then
               echo "OK      $name"
             else
               echo "FAILED  $name"
-              tail -40 "$log"
+              tail -60 "$log"
               broken=$((broken + 1))
             fi
           done
-          echo "----------------------------------------"
           echo "実行した notebook: ${executed} 件 / 失敗: ${broken} 件"
-          if [ "$broken" -gt 0 ]; then
-            echo "notebook の実行に失敗した。"
-            exit 1
-          fi
-          if [ "$executed" -eq 0 ]; then
-            echo "notebook が 1 件も実行されていない。glob を確認すること。"
-            exit 1
-          fi
-          echo "すべての notebook が正常に実行された。"
+          test "$executed" -gt 0
+          test "$broken" -eq 0
+
+  notebooks-full:
+    name: notebook 完全実行（手動）
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: conda 環境を作る
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pwsyseng
+          miniforge-version: latest
+          auto-activate-base: false
+      - name: インストールと完全実行
+        env:
+          MPLBACKEND: Agg
+        run: |
+          pip install -e .
+          python tools/build_notebooks.py
+          git diff --exit-code -- notebooks exercises
+          outdir="${RUNNER_TEMP}/nbexec-full"
+          mkdir -p "$outdir"
+          for nb in notebooks/*.ipynb; do
+            jupyter nbconvert --to notebook --execute --output-dir="$outdir" "$nb"
+          done

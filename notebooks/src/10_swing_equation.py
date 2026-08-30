@@ -33,7 +33,7 @@
 #
 # ## 電気出力 $P_e$
 #
-# 1 機無限大母線系統（SMIB）では、発電機の内部起電力 $E\angle\delta$ と
+# 1 機無限大母線系統（Single-Machine Infinite-Bus: SMIB）では、発電機の内部起電力 $E\angle\delta$ と
 # 無限大母線 $V_\infty\angle 0$ が総リアクタンス $X$ を介してつながります。
 # このとき電気出力は
 #

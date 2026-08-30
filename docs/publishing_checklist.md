@@ -29,12 +29,13 @@ grep -rn "/home/LAB\|/home/negishi\|anaconda3" \
 conda activate pwsyseng
 python tools/check_case.py         # 同梱ケースの整合性
 pytest -q                          # すべて通ること
-python tools/build_notebooks.py    # notebook を最新の src から再生成
+python tools/build_notebooks.py    # notebook を最新の src から再生成・構造検査
+git diff --exit-code -- notebooks exercises  # 生成物のコミット漏れがないこと
 ```
 
 再生成した `notebooks/*.ipynb` と `exercises/*.ipynb` もコミットしてください。
-CI は `src` から生成した notebook を実行するので、コミットし忘れても CI は
-通ってしまいます。学生が受け取るのはコミットされた `.ipynb` です。
+CI は再生成後に `git diff --exit-code` を実行し、コミット済みの `.ipynb` が
+原本と一致しない場合に失敗します。学生が受け取る生成物まで同期していることを確認できます。
 
 ## 4. notebook の出力を消しておく
 

@@ -1,4 +1,4 @@
-"""教材用の作図ヘルパ（第 00 回〜第 11 回）。
+"""教材用の作図ヘルパ（運用・計画パート）。
 
 **このモジュールの文字列リテラルは、docstring とコメントを除いてすべて
 ASCII で書く。** 軸ラベル・凡例・タイトル・注記に日本語を書くと、日本語
@@ -127,35 +127,35 @@ COURSE_THEMES = (
     (
         "Transient stability",
         "stay in step\nthrough a fault?",
-        "genstab 01-03, 08",
+        "pwsyseng 10-12, 17",
         1.0e-3,
         1.0e1,
     ),
     (
         "Steady-state stability,\nfrequency control",
         "hold the operating point?\nrestore frequency?",
-        "genstab 04-07",
+        "pwsyseng 13-16",
         1.0e0,
         1.0e2,
     ),
     (
         "Power flow, security",
         "flows within limits,\neven after N-1?",
-        "gridops 01-04, 09",
+        "pwsyseng 01-04, 09",
         6.0e1,
         3.6e3,
     ),
     (
         "Economic dispatch,\nunit commitment",
         "which units,\nat what output?",
-        "gridops 05-08",
+        "pwsyseng 05-08",
         3.6e3,
         8.64e4,
     ),
     (
         "Adequacy",
         "enough capacity\nat all?",
-        "gridops 10",
+        "pwsyseng 18",
         8.64e4,
         3.1536e8,
     ),
@@ -1251,19 +1251,19 @@ def plot_duck_curve(
     _hour_axis(ax, gross.size)
     ax.set_xlabel("Hour")
     ax.set_ylabel("Power [MW]")
-    ax.set_title(f"Net demand with VRE ({profile}, {float(vre.max()):.0f} MW peak PV)")
+    ax.set_title(f"Net demand with VRE ({profile}, {float(vre.max()):.0f} MW peak solar PV)")
     ax.legend(loc="lower left", fontsize=9)
     return _finish(ax, created)
 
 
 # ======================================================================
-# 第 10 回 — アデカシー
+# 第 18 回 — アデカシー
 # ======================================================================
 
 def plot_capacity_outage_table(
     copt: CapacityOutageTable, ax: Axes | None = None
 ) -> Axes:
-    """容量停止確率表を描く（第 10 回）。
+    """容量停止確率表を描く（第 18 回）。
 
     縦軸は対数である。確率は 1e-20 の桁まで落ちるので、線形軸では
     「先頭以外は全部ゼロ」に見えてしまい、**稀な多重停止こそが供給支障を
@@ -1345,7 +1345,7 @@ def plot_lolp_convergence(
     *,
     reference: float | None = None,
 ) -> Axes:
-    """モンテカルロの LOLP を標本数に対して描く（第 10 回）。
+    """モンテカルロの LOLP を標本数に対して描く（第 18 回）。
 
     点推定だけを並べても収束は判断できない。**95% 信頼区間が解析解を
     含むか**で見ること。誤差は :math:`1/\\sqrt{N}` でしか縮まないので、

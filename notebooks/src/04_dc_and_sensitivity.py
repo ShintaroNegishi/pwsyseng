@@ -1,5 +1,5 @@
 # %% [markdown]
-# # 04 直流潮流と感度係数 — PTDF と LODF
+# # 04 直流潮流と感度係数 — 送電電力分布係数（Power Transfer Distribution Factor: PTDF）と線路開放分布係数（Line Outage Distribution Factor: LODF）
 #
 # ## この回のねらい
 #

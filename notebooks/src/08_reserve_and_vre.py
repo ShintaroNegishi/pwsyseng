@@ -1,5 +1,5 @@
 # %% [markdown]
-# # 08 予備力と変動性電源 — 下げ代と出力抑制
+# # 08 予備力と変動性再生可能エネルギー（Variable Renewable Energy: VRE）— 下げ代と出力抑制
 #
 # ## この回のねらい
 #
@@ -7,7 +7,7 @@
 # - 予備力率を振って「安心の値段」を測る
 # - 太陽光を差し引いた **純需要**（ダックカーブ）で起動停止計画を解き直す
 # - 夕方のランプが急になること、下げ代が尽きて **出力抑制** が立つことを確かめる
-# - 起動している同期機の **慣性の合計** が減ることを定量化する（第 12 回への橋）
+# - 起動している同期機の **共通基準換算済みの慣性寄与の合計**が減ることを定量化する（第 12 回への橋）
 #
 # ## 予備力の 2 つの書き方
 #
@@ -23,6 +23,10 @@
 # と書きます。「**いま同期並列していて、まだ出していない容量**」が $R_t$ 以上
 # あること、という意味です。停止中の号機は $u = 0$ なので 1 MW も数えません。
 # 起動に何時間もかかる容量を予備力に数えない、というのがこの式の要点です。
+#
+# ただし、これは **同期並列中の上げ余力に基づく簡易な予備力容量モデル**です。
+# 所定時間内の応答、ランプ率、最大単一事故、送電制約、一次・二次・待機予備力の区別は
+# この制約だけでは表していません。実制度上の調整力商品と同一視しないでください。
 #
 # 教科書によっては $\textrm{(B)}\ \sum_i P^{max}_i u_{it} \ge (1 + r)\,D_t$ と
 # 書いてあります。こちらのほうが覚えやすいのですが、**(A) と同じ制約ではありません。**
@@ -135,17 +139,17 @@ plt.show()
 # 急速に消えます。効いてくるのは需要の大きさではなく、その **傾き** です。
 
 # %%
-capacities = [0.0, 120.0, 180.0, 240.0, 300.0]
+solar_capacities = [0.0, 120.0, 180.0, 240.0, 300.0]
 coal_ramp = sum(u.ramp_up for u in case.units if u.plant == "G1")
 
 fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.4))
 plot_duck_curve(case, ax=axes[0])
-for cap in capacities:
+for cap in solar_capacities:
     net = gridops.net_demand(case, demand, vre_mw=cap)
     ramp = np.diff(net)
     k = int(np.argmax(ramp))
-    axes[1].plot(hours[1:], ramp, label=f"PV {cap:.0f} MW")
-    print(f"PV {cap:5.0f} MW: 純需要の最小 {net.min():6.1f} MW、"
+    axes[1].plot(hours[1:], ramp, label=f"solar PV {cap:.0f} MW")
+    print(f"太陽光発電 {cap:5.0f} MW: 純需要の最小 {net.min():6.1f} MW、"
           f"最大ランプ {ramp.max():5.1f} MW/h（{k} 時 → {k + 1} 時）、"
           f"朝 5→6 時 {ramp[5]:5.1f} MW/h")
 axes[1].axhline(coal_ramp, color="k", ls="--", lw=1.2,
@@ -161,7 +165,7 @@ plt.show()
 # %% [markdown]
 # **朝のランプは太陽光が肩代わりし、夕方のランプは太陽光が作ります。**
 # 最大ランプの時刻が朝（5→6 時）から夕方（15→16 時）へ移り、
-# PV 300 MW では 69.4 MW/h に達します。石炭 3 台の増出力率の合計 60 MW/h では
+# 太陽光発電 300 MW では 69.4 MW/h に達します。石炭 3 台の増出力率の合計 60 MW/h では
 # 追いつきません。**足りない分は「もう 1 台起動する」以外に作れません。**
 #
 # ## 4. 下げ代不足と出力抑制
@@ -169,14 +173,14 @@ plt.show()
 # 設備容量を振って解き直します。見るのは費用ではなく `spill_mw` です。
 
 # %%
-runs_pv: dict[float, gridops.CommitmentResult] = {}
-for cap in capacities:
-    runs_pv[cap] = gridops.unit_commitment(case, demand, reserve_rate=0.10, vre_mw=cap)
+runs_solar: dict[float, gridops.CommitmentResult] = {}
+for cap in solar_capacities:
+    runs_solar[cap] = gridops.unit_commitment(case, demand, reserve_rate=0.10, vre_mw=cap)
 
-print(f"{'PV [MW]':>8} {'cost [JPY]':>14} {'spill [MWh]':>12} "
+print(f"{'solar PV [MW]':>13} {'cost [JPY]':>14} {'spill [MWh]':>12} "
       f"{'min net [MW]':>13} {'min SumPmin(on)':>16} {'starts':>7}")
-for cap in capacities:
-    run = runs_pv[cap]
+for cap in solar_capacities:
+    run = runs_solar[cap]
     on_pmin = sum(u.p_min_mw * run.schedule[u.name] for u in case.units)
     print(f"{cap:8.0f} {run.total_cost:14,.0f} {run.spill_mw.sum():12.1f} "
           f"{run.demand_mw.min():13.1f} {on_pmin.min():16.1f} {run.n_startups():7d}")
@@ -195,7 +199,7 @@ for cap in capacities:
 # 正しい。第 07 回で $\mathit{spill}$ を既定で常に入れていた理由がここにあります。
 
 # %%
-heavy = runs_pv[300.0]
+heavy = runs_solar[300.0]
 rate = heavy.options["reserve_rate"]
 net = heavy.demand_mw
 on_pmin = sum(u.p_min_mw * heavy.schedule[u.name] for u in case.units)
@@ -229,29 +233,30 @@ plt.show()
 #
 # ## 6. 起動している同期機の慣性
 #
-# 昼に火力を止めるということは、**回っている鉄の塊を減らす**ということです。
-# 同期機の慣性定数は台数分だけ足し算になるので（`gridops.interop.aggregate_plants`
-# が安定度へ渡すときに行う集約と同じ計算です）、起動している号機の $H$ を
-# 足し上げれば、その時刻の系統慣性が出ます。
+# 昼に火力を止めるということは、**回っている回転体を減らす**ということです。
+# 一般に、各発電機の銘板容量基準の慣性定数をそのまま足すことはできず、共通の
+# 系統基準容量へ換算して $H_{eq}=\sum_i H_i S_i/S_{base}$ とします。本教材の
+# `Unit.h` は、あらかじめ 100 MVA 共通基準へ換算した各号機の慣性寄与分です。
+# したがって、運転中の号機について次のように加算できます。
 #
-# $$ H^{sys}_t = \sum_i H_i \, u_{it} \quad [\mathrm{s}] $$
+# $$ H^{sys}_t = \sum_i \bar H_i \, u_{it} \quad [\mathrm{s\ on\ 100\ MVA\ base}] $$
 
 # %%
-# TODO(L3): 下のコードが PV 0 MW と 300 MW の系統慣性 H(t) を計算する。
+# TODO(L3): 下のコードが太陽光発電 0 MW と 300 MW の系統慣性 H(t) を計算する。
 #           (1) 最小値と減少率、そのとき動いている発電所を読み取ること。
 #           (2) 動揺方程式 2H dΔω/dt = Pm - Pe から、慣性が減ると事故直後の
-#               加速度がどうなるか。臨界事故除去時間 CCT（第 12 回）は
+#               加速度がどうなるか。臨界事故除去時間（Critical Clearing Time: CCT、第 12 回）は
 #               長くなるか短くなるか。理由とともに次の markdown セルに書くこと。
 #           (3) 昼の慣性を確保する方策を 1 つ挙げ、その費用を gridops の
 #               どの関数でいくらと見積もれるかを書くこと。
-inertia = {cap: sum(u.h * runs_pv[cap].schedule[u.name] for u in case.units)
+inertia = {cap: sum(u.h * runs_solar[cap].schedule[u.name] for u in case.units)
            for cap in (0.0, 300.0)}
 
 plt.figure(figsize=(9.0, 3.6))
 plt.fill_between(hours, inertia[300.0], inertia[0.0], step="mid", alpha=0.25,
                  label="inertia lost at midday")
 for cap, series in inertia.items():
-    plt.step(hours, series, where="mid", lw=2.0, label=f"PV {cap:.0f} MW")
+    plt.step(hours, series, where="mid", lw=2.0, label=f"solar PV {cap:.0f} MW")
 plt.ylim(0.0, None)
 plt.xlabel("Hour")
 plt.ylabel("Committed inertia $H^{sys}$ [s on 100 MVA]")
@@ -262,8 +267,8 @@ plt.show()
 
 worst = int(np.argmax(heavy.spill_mw))          # 抑制が最大の時刻
 for cap in (0.0, 300.0):
-    on = [u.name for u in case.units if runs_pv[cap].schedule[u.name][worst] > 0.5]
-    print(f"PV {cap:5.0f} MW: H = {inertia[cap].min():5.2f} 〜 {inertia[cap].max():5.2f} s、"
+    on = [u.name for u in case.units if runs_solar[cap].schedule[u.name][worst] > 0.5]
+    print(f"太陽光発電 {cap:5.0f} MW: H = {inertia[cap].min():5.2f} 〜 {inertia[cap].max():5.2f} s、"
           f"{worst} 時は {inertia[cap][worst]:5.2f} s（{', '.join(on)}）")
 print(f"{worst} 時の慣性の減少 = "
       f"{1 - inertia[300.0][worst] / inertia[0.0][worst]:.1%}")
@@ -275,7 +280,7 @@ print(f"{worst} 時の慣性の減少 = "
 #   角加速度は $H$ に反比例します。$H$ が 21% 減れば加速度は約 27% 増えます。
 #   等面積法（第 11 回）で言えば、**同じ加速面積に達するまでの時間が
 #   短くなる**ということです。第 12 回でこれを CCT として測ります。
-# - この日の最悪の時刻には、母線 2 の LNG コンバインドサイクルが **1 台も
+# - この日の最悪の時刻には、母線 2 の液化天然ガス（Liquefied Natural Gas: LNG）コンバインドサイクルが **1 台も
 #   回っていません**。第 17 回の標準事故（母線 7 の三相地絡を線路 5-7 の開放で
 #   除去）で最も大きく振れるのがこの機です。**同じ事故を、同じ日の違う時刻に
 #   起こしてみると答えが変わる** —— これが第 12 回の入口です。
