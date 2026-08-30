@@ -30,21 +30,22 @@ jobs:
           miniforge-version: latest
           auto-activate-base: false
 
-      - name: 適用スクリプトの初出置換を補正する
+      - name: 適用スクリプトの曖昧な置換を補正する
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path("tools/_apply_course_review_fixes.py")
           text = path.read_text(encoding="utf-8")
-          old = '''replace(
+
+          cct_old = '''replace(
               "notebooks/src/12_cct.py",
               "臨界事故除去時間 (CCT)",
               "臨界事故除去時間（Critical Clearing Time: CCT）",
               count=1,
               required=False,
           )'''
-          new = '''sub(
+          cct_new = '''sub(
               "notebooks/src/12_cct.py",
               re.escape("臨界事故除去時間 (CCT)"),
               "臨界事故除去時間（Critical Clearing Time: CCT）",
@@ -52,9 +53,29 @@ jobs:
               required=False,
               flags=0,
           )'''
-          if old not in text:
+          if cct_old not in text:
               raise SystemExit("CCT replacement block was not found")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          text = text.replace(cct_old, cct_new, 1)
+
+          start_marker = 'sub(\n    "src/gridops/solvers.py",'
+          end_marker = 'replace(\n    "docs/solver_notes.md",'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          solver_block = '''replace(
+              "src/gridops/solvers.py",
+              "これは実装の手抜きではない。整数変数を含む問題の最適値は右辺について\\n"
+              "区分的に一定な階段関数であり、微分（＝双対）がそもそも存在しない。\\n"
+              "CBC は分枝限定の最後の緩和問題の双対を返してくるが、その値は探索の\\n"
+              "経路に依存し、限界費用としての意味を持たない。",
+              "これは実装の手抜きではない。混合整数計画の整数最適解には、線形計画と同じ意味で\\n"
+              "一意に解釈できる影価格を一般には定義できない。連続緩和には双対変数があるが、\\n"
+              "それを元の整数問題の限界費用としてそのまま解釈してはならない。CBC が探索中の\\n"
+              "緩和問題について返す双対も、整数最適解の影価格ではない。",
+              count=1,
+          )
+          '''
+          text = text[:start] + solver_block + text[end:]
+          path.write_text(text, encoding="utf-8")
           PY
 
       - name: レビュー修正を適用する
