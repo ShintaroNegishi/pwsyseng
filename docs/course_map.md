@@ -44,7 +44,7 @@
 | 05 | `05_economic_dispatch` | 経済負荷配分 | 等増分燃料費、KKT、メリットオーダー、ペナルティファクタ |
 | 06 | `06_dc_opf_and_lmp` | 系統制約つき経済配分 | 直流最適潮流、ノード価格、混雑レント |
 | 07 | `07_unit_commitment` | 発電機起動停止計画 | 0-1 変数、状態遷移、最低運転停止時間、区分線形費用 |
-| 08 | `08_reserve_and_vre` | 予備力と変動性電源 | 運転予備力、下げ代、出力抑制、ダックカーブ |
+| 08 | `08_reserve_and_vre` | 予備力と変動性再生可能エネルギー (VRE) | 運転予備力、下げ代、出力抑制、ダックカーブ |
 | 09 | `09_security` | セキュリティ | N-1、スクリーニング、性能指数のマスキング、SCED |
 | 10 | `10_swing_equation` | 動揺方程式 | $2H\,d\Delta\omega/dt = P_m-P_e-D\Delta\omega$ |
 | 11 | `11_equal_area` | 等面積法 | 加速面積と減速面積 |
@@ -103,7 +103,7 @@
 切り分けられます（教材としては完成させてあります）。
 
 - gridops `03_voltage_stability`（電圧崩壊）
-- gridops `08_reserve_and_vre`（予備力と変動性電源）
+- `08_reserve_and_vre`（予備力と変動性再生可能エネルギー）
 - `16_lfc_governor`（周波数制御）
 - `11_equal_area` と `10_swing_equation` の統合（時間が無いとき）
 

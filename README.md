@@ -117,7 +117,7 @@ conda-forge の `pulp` は CBC を**同梱していない**ので、`environment
 | 05 | `05_economic_dispatch` | 経済負荷配分 | 等増分燃料費、KKT |
 | 06 | `06_dc_opf_and_lmp` | 系統制約つき経済配分 | 直流最適潮流、ノード価格、混雑レント |
 | 07 | `07_unit_commitment` | 発電機起動停止計画 | 0-1 変数、最低運転停止時間 |
-| 08 | `08_reserve_and_vre` | 予備力と変動性電源 | 運転予備力、下げ代、出力抑制 |
+| 08 | `08_reserve_and_vre` | 予備力と変動性再生可能エネルギー (VRE) | 運転予備力、下げ代、出力抑制 |
 | 09 | `09_security` | セキュリティ | N-1、スクリーニング、SCED |
 | 10 | `10_swing_equation` | 動揺方程式 | 慣性、$P_e = P_{max}\sin\delta$ |
 | 11 | `11_equal_area` | 等面積法 | 加速面積と減速面積 |

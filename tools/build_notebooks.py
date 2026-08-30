@@ -136,6 +136,12 @@ def build(source_path: Path, *, with_solutions: bool) -> nbformat.NotebookNode:
             if body.strip():
                 notebook.cells.append(nbformat.v4.new_code_cell(body))
 
+    # セル id を位置から決定的に振る。nbformat の既定は乱数の id で、
+    # 再生成のたびに全ファイルが差分になり、CI の
+    # 「再生成して git diff --exit-code」検査が内容と無関係に落ちる。
+    for index, cell in enumerate(notebook.cells):
+        cell["id"] = f"{source_path.stem}-{index:03d}"
+
     nbformat.validate(notebook)
     return notebook
 
