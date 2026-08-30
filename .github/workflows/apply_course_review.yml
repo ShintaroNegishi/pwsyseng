@@ -30,6 +30,33 @@ jobs:
           miniforge-version: latest
           auto-activate-base: false
 
+      - name: 適用スクリプトの初出置換を補正する
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/_apply_course_review_fixes.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''replace(
+              "notebooks/src/12_cct.py",
+              "臨界事故除去時間 (CCT)",
+              "臨界事故除去時間（Critical Clearing Time: CCT）",
+              count=1,
+              required=False,
+          )'''
+          new = '''sub(
+              "notebooks/src/12_cct.py",
+              re.escape("臨界事故除去時間 (CCT)"),
+              "臨界事故除去時間（Critical Clearing Time: CCT）",
+              count=1,
+              required=False,
+              flags=0,
+          )'''
+          if old not in text:
+              raise SystemExit("CCT replacement block was not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: レビュー修正を適用する
         run: python tools/_apply_course_review_fixes.py
 
