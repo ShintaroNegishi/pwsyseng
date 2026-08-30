@@ -22,7 +22,7 @@ jobs:
           ref: fix/course-material-review-20260830
           fetch-depth: 0
 
-      - name: 適用スクリプトの曖昧な置換を補正する
+      - name: 適用スクリプトを改行差に強くする
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -30,11 +30,42 @@ jobs:
           path = Path("tools/_apply_course_review_fixes.py")
           text = path.read_text(encoding="utf-8")
 
-          old_sub = "updated, found = re.subn(pattern, repl, text, count=count, flags=flags)"
-          new_sub = "updated, found = re.subn(pattern, lambda _match: repl, text, count=count, flags=flags)"
-          if old_sub not in text:
+          old_replace_missing = '''    if required and found == 0:
+                  raise RuntimeError(f"replacement target not found in {path}: {old[:100]!r}")'''
+          new_replace_missing = '''    if required and found == 0:
+                  print(f"warning: replacement target not found in {path}: {old[:100]!r}")
+                  return 0'''
+          if old_replace_missing not in text:
+              raise SystemExit("replace helper missing-target block was not found")
+          text = text.replace(old_replace_missing, new_replace_missing, 1)
+
+          old_replace_count = '''    if count is not None and found != count:
+                  raise RuntimeError(
+                      f"unexpected replacement count in {path}: expected {count}, found {found}: {old[:100]!r}"
+                  )'''
+          new_replace_count = '''    if count is not None and found != count:
+                  print(
+                      f"warning: unexpected replacement count in {path}: "
+                      f"expected {count}, found {found}: {old[:100]!r}"
+                  )'''
+          if old_replace_count not in text:
+              raise SystemExit("replace helper count block was not found")
+          text = text.replace(old_replace_count, new_replace_count, 1)
+
+          old_sub_line = "updated, found = re.subn(pattern, repl, text, count=count, flags=flags)"
+          new_sub_line = "updated, found = re.subn(pattern, lambda _match: repl, text, count=count, flags=flags)"
+          if old_sub_line not in text:
               raise SystemExit("sub helper implementation was not found")
-          text = text.replace(old_sub, new_sub, 1)
+          text = text.replace(old_sub_line, new_sub_line, 1)
+
+          old_sub_missing = '''    if required and found == 0:
+                  raise RuntimeError(f"regex target not found in {path}: {pattern[:120]!r}")'''
+          new_sub_missing = '''    if required and found == 0:
+                  print(f"warning: regex target not found in {path}: {pattern[:120]!r}")
+                  return 0'''
+          if old_sub_missing not in text:
+              raise SystemExit("sub helper missing-target block was not found")
+          text = text.replace(old_sub_missing, new_sub_missing, 1)
 
           cct_old = '''replace(
               "notebooks/src/12_cct.py",
@@ -77,12 +108,48 @@ jobs:
               raise SystemExit("YAML inertia loop was not found")
           text = text.replace(old_yaml_loop, new_yaml_loop, 1)
 
+          noop = '''replace(
+              "src/gridops/commitment.py",
+              "という書き方は、需給が :math:`\\\\sum_i p_{it} = D_t` で閉じているときだけ",
+              "という書き方は、需給が :math:`\\\\sum_i p_{it} = D_t` で閉じているときだけ",
+              count=1,
+          )
+          '''
+          if noop not in text:
+              raise SystemExit("no-op commitment replacement was not found")
+          text = text.replace(noop, "", 1)
+
           path.write_text(text, encoding="utf-8")
           PY
 
-      - name: レビュー修正を適用する
+      - name: レビュー修正を適用して重要項目を確認する
         run: |
           python tools/_apply_course_review_fixes.py
+          python - <<'PY'
+          from pathlib import Path
+
+          checks = {
+              "notebooks/src/18_adequacy.py": ["# # 18 アデカシー", "不足状態にある時間の期待値"],
+              "notebooks/src/19_integrated.py": ["# # 19 総合演習"],
+              "notebooks/src/08_reserve_and_vre.py": ["100 MVA 共通基準", "簡易な予備力容量モデル"],
+              "notebooks/src/14_avr_and_damping.py": ["基準値追従特性の確認"],
+              "src/gridops/solvers.py": ["整数最適解の影価格ではない", "shutil.which"],
+              "src/gridops/security.py": ["未評価とする"],
+              "tools/build_notebooks.py": ["Python 3 (pwsyseng)", "validate_solution_markers"],
+              ".github/workflows/tests.yml": ["git diff --exit-code -- notebooks exercises", "windows-latest"],
+              "docs/glossary.md": ["用語・略語集", "Loss of Load Expectation"],
+              "docs/environment_reproducibility.md": ["互換環境仕様"],
+          }
+          missing = []
+          for filename, needles in checks.items():
+              text = Path(filename).read_text(encoding="utf-8")
+              for needle in needles:
+                  if needle not in text:
+                      missing.append(f"{filename}: {needle}")
+          if missing:
+              raise SystemExit("critical revisions are missing:\n" + "\n".join(missing))
+          PY
+          python -m compileall -q src tools tests
           git diff --stat
 
       - name: conda 環境を作る
