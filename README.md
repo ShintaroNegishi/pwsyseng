@@ -71,9 +71,10 @@ conda activate pwsyseng
 pip install -e .
 ```
 
-**教員・学生ともにこの `environment.yml` 1 つで同じ環境を作ります。**
-環境が分かれると「手元では動くのに」という問題の切り分けに時間を取られるので、
-全員が `pwsyseng` という同じ名前の環境を使う運用にしています。
+**教員・学生ともに `environment.yml` から `pwsyseng` 環境を作ります。**
+このファイルは必要なパッケージ集合をそろえるための互換環境仕様であり、依存パッケージの
+厳密な版はインストール日により変わり得ます。授業年度の動作確認と環境情報の保存方法は
+[docs/environment_reproducibility.md](docs/environment_reproducibility.md) を参照してください。
 
 Jupyter を起動するときは、必ず `conda activate pwsyseng` してからにしてください。
 
@@ -138,6 +139,8 @@ conda-forge の `pulp` は CBC を**同梱していない**ので、`environment
 
 全 20 回の一覧と、**回どうしの受け渡し**（前の回の出力が次の回の入力になる
 仕掛け）は [docs/course_map.md](docs/course_map.md) にまとめています。
+略語の正式名称は [docs/glossary.md](docs/glossary.md)、環境の再現性は
+[docs/environment_reproducibility.md](docs/environment_reproducibility.md) を参照してください。
 
 - `notebooks/` : 解答入り（教員用）
 - `exercises/` : 穴埋め版（学生配布用）

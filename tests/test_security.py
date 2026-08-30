@@ -358,9 +358,11 @@ def test_bridges_are_skipped_and_never_appear_in_results(case: Case) -> None:
 
 
 def test_default_candidates_come_from_the_case(case: Case, report: SecurityReport) -> None:
-    """既定の候補はケースの ``contingencies`` 層であり、橋は最初から入っていない。"""
+    """既定の評価対象はケースの候補で、対象外の橋も未評価として記録する。"""
     assert sorted(r.outage for r in report.results) == sorted(case.contingencies)
-    assert report.skipped == []
+    assert [key for key, _reason in report.skipped] == BRIDGES
+    assert all("未評価" in reason or "適用でき" in reason
+               for _key, reason in report.skipped)
 
 
 # ======================================================================
@@ -676,7 +678,7 @@ def test_report_text_mentions_the_voltage_violation(report: SecurityReport) -> N
     table = report.to_table()
     assert "outage" in table and "worst branch" in table and "PI" in table
     assert "INSECURE" in table
-    assert len(table.splitlines()) == 3 + len(report.results)
+    assert len(table.splitlines()) == 3 + len(report.results) + len(report.skipped)
 
     one = next(r for r in report.results if r.outage == (4, 6)).summary()
     assert "熱容量" not in one          # 過負荷は 1 件も無い

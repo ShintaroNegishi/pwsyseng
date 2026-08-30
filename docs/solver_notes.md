@@ -7,7 +7,7 @@
 
 | 候補 | 判断 |
 |---|---|
-| **PuLP + CBC** | 採用。定式化が数式に近い形で書けて可読性が高く、conda-forge に Windows / macOS / Linux のビルド済みバイナリがあります。研究室の `energy-mix/` でも使用実績があります |
+| **PuLP + CBC** | 採用。定式化が数式に近い形で書けて可読性が高く、conda-forge に Windows / macOS / Linux のビルド済みバイナリがあります |
 | `scipy.optimize.milp` (HiGHS) | 追加依存がゼロで CBC より速い（実測で約 12 倍）のは利点ですが、制約行列を自分で組む必要があり、変数のフラット化と添字の管理が教材のノイズになります |
 | Gurobi | 却下。アカデミックライセンスの導入が学生には関門です。加えて pip 版に付く制限ライセンスは 2000 変数 / 2000 制約なので、**小さいモデルは解けて大きいモデルだけ解けない**という最も切り分けの難しい事態を招きます |
 
@@ -45,6 +45,7 @@ RuntimeError: 使える CBC が見つからない。
 ```bash
 conda activate pwsyseng
 conda install -c conda-forge coin-or-cbc
+python -c "import shutil; print(shutil.which('cbc'))"
 python -c "import pulp; print(pulp.listSolvers(onlyAvailable=True))"
 ```
 
@@ -78,13 +79,13 @@ prob.constraints["balance"].pi
 結論になるので、`gridops.dispatch` は `DCOPFResult.congestion_price` を
 必ず正で持ちます。
 
-## 混合整数計画に双対はない
+## 混合整数計画の整数解に影価格を直接対応させない
 
-`unit_commitment` は混合整数計画なので、**双対変数を返しません**。
-これは実装の都合ではなく、混合整数計画に真の双対が存在しないという
-理論的な事実です。時間別の限界費用が要るときは、得られた入切を固定して
-線形計画に落とし直す 2 段階が必要で、`gridops.commitment.marginal_prices`
-がそれを行います。
+`unit_commitment` は混合整数計画なので、整数最適解に線形計画と同じ意味の
+双対変数を返しません。連続緩和には双対がありますが、それを元の整数問題の
+限界費用としてそのまま解釈することはできません。時間別の条件付き限界費用が
+必要なときは、得られた入切を固定して線形計画に落とし直します。
+`gridops.commitment.marginal_prices` がこの 2 段階を実行します。
 
 ## 解の縮退
 

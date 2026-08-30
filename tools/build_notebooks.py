@@ -1,29 +1,14 @@
 #!/usr/bin/env python
 """notebook のソース (.py) から .ipynb を生成する。
 
-なぜソースを .py で持つのか
----------------------------
-.ipynb は JSON なので、差分が読めず、複数人での編集も衝突しやすい。
-そこで教材の原本は jupytext と同じ「percent 形式」の .py で持ち、
-配布用の .ipynb はここから機械的に生成する。教員が中身を直すときは
-必ず ``notebooks/src/*.py`` を編集すること。
-
-生成されるもの
---------------
-``notebooks/``
-    解答入りの notebook（教員用）。
-``exercises/``
-    ``# BEGIN SOLUTION`` から ``# END SOLUTION`` までを取り除き、
-    代わりに ``# TODO:`` の指示だけを残した学生配布用 notebook。
-
-使い方::
-
-    python tools/build_notebooks.py            # すべて生成
-    python tools/build_notebooks.py 01 04      # 指定した番号だけ
+教材の原本は jupytext と同じ percent 形式の ``notebooks/src/*.py`` で持ち、
+解答入り notebook と学生用の穴埋め版を機械的に生成する。生成時には、
+見出し番号、解答ブロック、nbformat の妥当性も検査する。
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -39,7 +24,7 @@ SOLUTION_END = "# END SOLUTION"
 
 
 def parse_percent_format(text: str) -> list[tuple[str, str]]:
-    """percent 形式の文字列を (セル種別, 内容) のリストに分解する。"""
+    """percent 形式の文字列を ``(セル種別, 内容)`` のリストに分解する。"""
     cells: list[tuple[str, str]] = []
     kind = "code"
     buffer: list[str] = []
@@ -55,7 +40,6 @@ def parse_percent_format(text: str) -> list[tuple[str, str]]:
             flush()
             kind = "markdown" if "[markdown]" in stripped else "code"
         elif kind == "markdown":
-            # markdown セルは行頭の "# " を剥がす。
             if line.startswith("# "):
                 buffer.append(line[2:])
             elif stripped == "#":
@@ -68,25 +52,59 @@ def parse_percent_format(text: str) -> list[tuple[str, str]]:
     return cells
 
 
-def strip_solutions(source: str) -> str:
-    """解答部分を取り除く。
+def validate_solution_markers(source: str, path: Path) -> None:
+    """解答ブロックの閉じ忘れ、余分な終了、入れ子を拒否する。"""
+    inside = False
+    begin_line = -1
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        marker = line.strip()
+        if marker == SOLUTION_BEGIN:
+            if inside:
+                raise ValueError(
+                    f"{path}:{line_number}: {SOLUTION_BEGIN} が入れ子になっている"
+                )
+            inside = True
+            begin_line = line_number
+        elif marker == SOLUTION_END:
+            if not inside:
+                raise ValueError(
+                    f"{path}:{line_number}: 対応する {SOLUTION_BEGIN} がない"
+                )
+            inside = False
+    if inside:
+        raise ValueError(
+            f"{path}:{begin_line}: {SOLUTION_BEGIN} が {SOLUTION_END} で閉じていない"
+        )
 
-    ``# BEGIN SOLUTION`` から ``# END SOLUTION`` までを削除し、
-    その位置に元のインデントを保った ``...`` を残す。直前に
-    ``# TODO:`` で始まる行があれば、それは指示として残す。
-    """
-    lines = source.splitlines()
+
+def validate_heading(source_path: Path, cells: list[tuple[str, str]]) -> None:
+    """ファイル名の番号と最初の Markdown 見出し番号を一致させる。"""
+    expected = source_path.stem.split("_", 1)[0]
+    first_markdown = next((body for kind, body in cells if kind == "markdown"), "")
+    match = re.search(r"^#\s+(\d{2})(?:\s|$)", first_markdown, flags=re.MULTILINE)
+    if match is None:
+        raise ValueError(f"{source_path}: 最初の Markdown セルに '# NN' 見出しがない")
+    actual = match.group(1)
+    if actual != expected:
+        raise ValueError(
+            f"{source_path}: ファイル番号 {expected} と見出し番号 {actual} が一致しない"
+        )
+
+
+def strip_solutions(source: str, path: Path) -> str:
+    """解答部分を削除し、同じインデントの ``...`` に置き換える。"""
+    validate_solution_markers(source, path)
     output: list[str] = []
     inside = False
     indent = ""
 
-    for line in lines:
-        stripped = line.strip()
-        if stripped == SOLUTION_BEGIN:
+    for line in source.splitlines():
+        marker = line.strip()
+        if marker == SOLUTION_BEGIN:
             inside = True
             indent = line[: len(line) - len(line.lstrip())]
             continue
-        if stripped == SOLUTION_END:
+        if marker == SOLUTION_END:
             inside = False
             output.append(f"{indent}...  # ここを埋めること")
             continue
@@ -96,23 +114,29 @@ def strip_solutions(source: str) -> str:
 
 
 def build(source_path: Path, *, with_solutions: bool) -> nbformat.NotebookNode:
-    """1 つのソースから notebook を組み立てる。"""
+    """1 つのソースから notebook を組み立て、構造を検証する。"""
     text = source_path.read_text(encoding="utf-8")
+    validate_solution_markers(text, source_path)
+    cells = parse_percent_format(text)
+    validate_heading(source_path, cells)
+
     notebook = nbformat.v4.new_notebook()
     notebook.metadata["kernelspec"] = {
-        "display_name": "Python 3 (gridops)",
+        "display_name": "Python 3 (pwsyseng)",
         "language": "python",
         "name": "python3",
     }
     notebook.metadata["language_info"] = {"name": "python"}
 
-    for kind, content in parse_percent_format(text):
+    for kind, content in cells:
         if kind == "markdown":
             notebook.cells.append(nbformat.v4.new_markdown_cell(content))
         else:
-            body = content if with_solutions else strip_solutions(content)
+            body = content if with_solutions else strip_solutions(content, source_path)
             if body.strip():
                 notebook.cells.append(nbformat.v4.new_code_cell(body))
+
+    nbformat.validate(notebook)
     return notebook
 
 
@@ -129,7 +153,6 @@ def main(argv: list[str]) -> int:
 
     for source in sources:
         name = source.stem + ".ipynb"
-
         solution = build(source, with_solutions=True)
         nbformat.write(solution, NOTEBOOK_DIR / name)
 
@@ -140,7 +163,7 @@ def main(argv: list[str]) -> int:
         note = "（穴埋めあり）" if has_blanks else "（穴埋めなし）"
         print(f"  {source.name} -> notebooks/{name}, exercises/{name} {note}")
 
-    print(f"\n{len(sources)} 件の notebook を生成した。")
+    print(f"\n{len(sources)} 件の notebook を生成し、構造を検証した。")
     return 0
 
 

@@ -324,8 +324,8 @@ def test_design_ratings_reproduces_the_shipped_thermal_ratings():
     assert "拘束しない枝の最大負荷率: 91.1%" in out.stdout
 
 
-def test_build_notebooks_generates_a_notebook_with_the_gridops_kernel(tmp_path):
-    """``tools/build_notebooks.py`` が gridops のカーネル名で notebook を作る。
+def test_build_notebooks_generates_a_notebook_with_the_pwsyseng_kernel(tmp_path):
+    """``tools/build_notebooks.py`` が pwsyseng のカーネル名で notebook を作る。
 
     穴埋め（``# BEGIN SOLUTION`` 〜 ``# END SOLUTION``）が
     ``exercises/`` 側でだけ落ちることも合わせて確かめる。生成物を
@@ -339,7 +339,7 @@ def test_build_notebooks_generates_a_notebook_with_the_gridops_kernel(tmp_path):
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_text(
         "# %% [markdown]\n"
-        "# # 見出し\n"
+        "# # 99 パッケージテスト\n"
         "\n"
         "# %%\n"
         "import gridops\n"
@@ -361,8 +361,8 @@ def test_build_notebooks_generates_a_notebook_with_the_gridops_kernel(tmp_path):
         solution = nbformat.read(produced[0].open(encoding="utf-8"), as_version=4)
         exercise = nbformat.read(produced[1].open(encoding="utf-8"), as_version=4)
 
-        assert solution.metadata["kernelspec"]["display_name"] == "Python 3 (gridops)"
-        assert exercise.metadata["kernelspec"]["display_name"] == "Python 3 (gridops)"
+        assert solution.metadata["kernelspec"]["display_name"] == "Python 3 (pwsyseng)"
+        assert exercise.metadata["kernelspec"]["display_name"] == "Python 3 (pwsyseng)"
 
         solution_code = "\n".join(c.source for c in solution.cells if c.cell_type == "code")
         exercise_code = "\n".join(c.source for c in exercise.cells if c.cell_type == "code")

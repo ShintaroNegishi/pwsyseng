@@ -356,7 +356,7 @@ def _no_solver_error() -> RuntimeError:
         "使えなかった。次の順に確認すること。\n"
         "  1. conda activate pwsyseng を忘れていないか。"
         "（環境を有効にしないと cbc が PATH に載らない）\n"
-        "  2. cbc が入っているか。`which cbc` で何も出なければ\n"
+        "  2. cbc が入っているか。`python -c \"import shutil; print(shutil.which('cbc'))\"`\n"
         "     conda install -c conda-forge coin-or-cbc\n"
         "  3. pip 版の PuLP なら CBC が同梱されている: pip install pulp\n"
         "  4. 使えるソルバの一覧は pulp.listSolvers(onlyAvailable=True) で見られる。\n"
@@ -385,7 +385,7 @@ def available_solver(
     2 つを順に試すのは、CBC の入り方が環境で違うためである。pip 版の PuLP は
     CBC のバイナリを同梱しており ``PULP_CBC_CMD`` が使える。conda-forge 版の
     PuLP は同梱しないので、別途入れた ``coin-or-cbc`` を ``COIN_CMD`` が
-    PATH から探す。研究室の ``genstab`` 環境は後者である。どちらでも同じ
+    PATH から探す。conda-forge から環境を作った場合は後者になる。どちらでも同じ
     コードが動くようにしておかないと、「先生の画面では動くのに」が起きる。
 
     Parameters
@@ -513,10 +513,10 @@ def solve(
     Notes
     -----
     **混合整数計画では :attr:`Solution.duals` は空の辞書になる。**
-    これは実装の手抜きではない。整数変数を含む問題の最適値は右辺について
-    区分的に一定な階段関数であり、微分（＝双対）がそもそも存在しない。
-    CBC は分枝限定の最後の緩和問題の双対を返してくるが、その値は探索の
-    経路に依存し、限界費用としての意味を持たない。意味のある値が欲しい
+    これは実装の手抜きではない。混合整数計画の整数最適解には、線形計画と同じ意味で
+一意に解釈できる影価格を一般には定義できない。連続緩和には双対変数があるが、
+それを元の整数問題の限界費用としてそのまま解釈してはならない。CBC が探索中の
+緩和問題について返す双対も、整数最適解の影価格ではない。意味のある値が欲しい
     ときは、得られた整数解を固定して線形計画に落とし直してから双対を取る
     （:func:`gridops.commitment.marginal_prices` がそうしている）。
     """

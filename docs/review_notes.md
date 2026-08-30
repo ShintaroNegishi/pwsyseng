@@ -2,7 +2,7 @@
 
 この記録は安定度パート（`src/genstab`、旧・単体リポジトリ genstab）に
 関するものです。運用・計画パート（`src/gridops`）のレビュー記録は
-追記予定です。
+[gridops_review_notes.md](gridops_review_notes.md) を参照してください。
 
 2026 年 8 月、genstab の初回公開の直後に codex（OpenAI の CLI エージェント）へ
 独立したバグレビューを依頼しました。23 件の指摘を受け、そのうち

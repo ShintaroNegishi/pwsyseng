@@ -66,8 +66,7 @@ WSCC 9 母線で分かること
 橋は候補にしない
 ----------------
 変圧器 3 本 ``(1,4), (2,7), (3,9)`` は **橋**（開放すると系統が 2 つの
-島に分かれる枝）である。事故後潮流という概念自体が成り立たないので
-候補から外すが、**外した事実は捨てずに** :attr:`SecurityReport.skipped`
+島に分かれる枝）である。連結系統を前提とする LODF を適用できないので候補から外すが、**外した事実は捨てずに** :attr:`SecurityReport.skipped`
 に理由つきで残す。「候補になかった」と「検査して健全だった」を
 取り違えると、解析の穴がそのまま見えなくなるからである。同じ 3 本を
 :func:`gridops.ybus.bridges` が独立に検出し、:func:`gridops.dc.lodf` は
@@ -932,7 +931,18 @@ def screen_n1(
     candidates = _candidates(case, contingencies)
     bridge_set = set(bridges(case))
 
-    skipped: list[tuple[tuple[int, int], str]] = []
+    # ケース側で橋を候補から除いていても、既定解析では『未評価』として記録する。
+    # 除外した事実を残さないと、『候補に無かった』と『評価して健全だった』を区別できない。
+    skipped: list[tuple[tuple[int, int], str]] = [
+        (
+            key,
+            "橋（唯一の連絡路）なので開放後は系統が島に分かれる。"
+            "連結系統を前提とする LODF は適用できず、本教材は島ごとの"
+            "基準母線・需給再配分・周波数変動・負荷遮断を扱わないため未評価とする。",
+        )
+        for key in sorted(bridge_set)
+        if contingencies is None and key not in candidates
+    ]
     kept: list[tuple[int, int]] = []
     for key in candidates:
         if key in bridge_set:
@@ -940,7 +950,8 @@ def screen_n1(
                 (
                     key,
                     "橋（この枝が唯一の連絡路）なので、開放すると系統が島に"
-                    "分かれ、事故後潮流が定義できない。gridops.ybus.bridges() "
+                    "分かれる。連結系統を前提とする LODF は適用できず、"
+                    "本教材は島ごとの需給再配分を扱わない。gridops.ybus.bridges() "
                     "が独立に同じ枝を返す。除外は健全という意味ではない。",
                 )
             )
