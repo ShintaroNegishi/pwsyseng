@@ -578,7 +578,7 @@ def test_capacity_outage_table_uses_a_log_axis(drawings, copt):
     """縦軸が対数で、階段が累積確率と一致すること。
 
     線形軸では 1e-20 の桁が潰れて「先頭以外はゼロ」に見える。稀な多重停止
-    こそが供給支障を決める、という第 10 回の要点が消えてしまう。
+    こそが供給支障を決める、という第 18 回の要点が消えてしまう。
     """
     fig, ax = _draw(drawings, "plot_capacity_outage_table")
     assert ax.get_yscale() == "log"

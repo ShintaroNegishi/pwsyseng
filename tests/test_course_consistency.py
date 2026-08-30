@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gridops import load_case
+from gridops.plotting import COURSE_THEMES
 from gridops.security import screen_n1
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,3 +45,23 @@ def test_default_n1_report_records_bridge_outages_as_unassessed() -> None:
     report = screen_n1(load_case("wscc9"), method="lodf", check_voltage=False)
     assert [key for key, _reason in report.skipped] == [(1, 4), (2, 7), (3, 9)]
     assert all("未評価" in reason or "適用でき" in reason for _key, reason in report.skipped)
+
+
+
+def test_timescale_map_uses_integrated_course_numbers() -> None:
+    labels = [theme[2] for theme in COURSE_THEMES]
+    assert labels == [
+        "pwsyseng 10-12, 17",
+        "pwsyseng 13-16",
+        "pwsyseng 01-04, 09",
+        "pwsyseng 05-08",
+        "pwsyseng 18",
+    ]
+
+
+def test_adequacy_notebook_describes_lole_as_an_expectation() -> None:
+    text = (ROOT / "notebooks" / "src" / "18_adequacy.py").read_text(
+        encoding="utf-8"
+    )
+    assert "供給不足状態になると期待されるか" in text
+    assert "何時間足りないか」という**確率**" not in text
