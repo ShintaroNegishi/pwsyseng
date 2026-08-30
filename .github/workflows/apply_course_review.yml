@@ -30,6 +30,12 @@ jobs:
           path = Path("tools/_apply_course_review_fixes.py")
           text = path.read_text(encoding="utf-8")
 
+          old_sub = "updated, found = re.subn(pattern, repl, text, count=count, flags=flags)"
+          new_sub = "updated, found = re.subn(pattern, lambda _match: repl, text, count=count, flags=flags)"
+          if old_sub not in text:
+              raise SystemExit("sub helper implementation was not found")
+          text = text.replace(old_sub, new_sub, 1)
+
           cct_old = '''replace(
               "notebooks/src/12_cct.py",
               "臨界事故除去時間 (CCT)",
