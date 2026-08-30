@@ -899,16 +899,38 @@ def test_candidates_fall_back_to_all_branches(case: Case) -> None:
     assert sorted(key for key, _ in report.skipped) == BRIDGES
 
 
-def test_is_secure_ignores_skipped_branches(case: Case) -> None:
-    """``is_secure`` は「候補にした事故の範囲で」の判定である。
+def test_bridges_only_candidates_refuse_to_pretend_security(case: Case) -> None:
+    """橋だけを候補にすると、黙って ``is_secure=True`` を返さず止まること。
 
-    橋だけを候補に与えると評価対象がゼロ件になり、``is_secure`` は
-    ``True`` を返す。**何も検査していないのだから当然であり、これを
-    「N-1 に耐える」と読んではいけない。** ``skipped`` を必ず併せて
-    見ること、という規約をテストで固定しておく。
+    以前は評価対象ゼロ件のまま ``True`` を返しており、「何も検査して
+    いないのに N-1 健全」と誤読される API だった（外部レビューの指摘 #6）。
+    いまは評価できる事故が 1 件もなければ日本語の ValueError になる。
     """
-    report = screen_n1(case, contingencies=BRIDGES)
-    assert report.results == []
-    assert report.is_secure is True          # ← 1 件も検査していない
-    assert len(report.skipped) == 3
-    assert "除外 3 件" in report.summary()
+    with pytest.raises(ValueError, match="評価できる想定事故"):
+        screen_n1(case, contingencies=BRIDGES)
+
+
+# ======================================================================
+# 外部レビュー（2026-08-30）の回帰
+# ======================================================================
+def test_report_exposes_unassessed_contingencies(report: SecurityReport) -> None:
+    """未評価の事故が残っていることを ``has_unassessed`` が明示すること。
+
+    外部レビューの指摘 #6。``is_secure`` は評価した事故だけの判定なので、
+    橋 3 本が未評価のまま「N-1 健全」と読まれないよう、まずこのフラグを
+    見る運用にする。
+    """
+    assert report.has_unassessed is True
+    assert len(report.skipped) == len(BRIDGES)
+
+
+def test_screening_with_no_assessable_contingency_raises(case: Case) -> None:
+    """評価できる想定事故が 1 件も無ければ日本語で止まること。
+
+    空リストや「すべて橋」の指定は、黙って ``is_secure=True`` を返すと
+    「検査して健全だった」と誤読される（外部レビューの指摘 #6）。
+    """
+    with pytest.raises(ValueError, match="評価できる想定事故"):
+        screen_n1(case, contingencies=[])
+    with pytest.raises(ValueError, match="評価できる想定事故"):
+        screen_n1(case, contingencies=list(BRIDGES))

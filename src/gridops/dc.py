@@ -327,6 +327,9 @@ class DCSolution:
                 f"limit={limit!r} は使えない。{LIMIT_NAMES} のいずれかを指定すること"
                 "（rate_a が常時許容容量、rate_b が緊急時許容容量）。"
             )
+        from .case import validate_rating_attribute
+
+        validate_rating_attribute(limit)
         rates = np.array([getattr(branch, limit) for branch in self.case.branches])
         if np.any(rates <= 0.0):
             bad = [

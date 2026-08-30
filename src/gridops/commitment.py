@@ -18,6 +18,7 @@
 :math:`d_{itk}`         区分線形費用の第 :math:`k` セグメントの出力 [MW]
 :math:`\\mathit{shed}_t`  供給不足 [MW]
 :math:`\\mathit{spill}_t` 出力抑制 [MW]
+:math:`r_t`             予備力不足 [MW]
 ======================  ====================================================
 
 制約は次のとおり。
@@ -29,7 +30,7 @@
     P^{min}_i u_{it} \\le p_{it} &\\le P^{max}_i u_{it} \\\\
     p_{it} &= P^{min}_i u_{it} + \\sum_k d_{itk} \\\\
     \\sum_i p_{it} + \\mathit{shed}_t - \\mathit{spill}_t &= D_t \\\\
-    \\sum_i (P^{max}_i u_{it} - p_{it}) &\\ge R_t \\\\
+    \\sum_i (P^{max}_i u_{it} - p_{it}) + r_t &\\ge R_t \\\\
     \\sum_{s=t-TU_i+1}^{t} v_{is} &\\le u_{it} \\\\
     \\sum_{s=t-TD_i+1}^{t} w_{is} &\\le 1 - u_{it} \\\\
     p_{it} - p_{i,t-1} &\\le RU_i u_{i,t-1} + SU_i v_{it} \\\\
@@ -51,6 +52,17 @@
 ただし本モデルは同期並列中の上げ余力を容量として数える簡易表現であり、
 応答時間、ランプ率、最大単一事故、送電制約、一次・二次・待機予備力の
 区別を同時には表さない。制度上の調整力商品と同一視しないこと。
+
+予備力と負荷遮断の順序
+----------------------
+予備力不足 :math:`r_t` の価格は VOLL の半分（:data:`RESERVE_PENALTY_RATIO`）
+に置く。燃料費・起動費 ≪ 予備力不足の価格 < VOLL という価格の順序により、
+(1) 予備力は満たせる限り号機の起動で満たされ、(2) 物理的に満たせない
+ときは **予備力を先に手放し**、(3) それでも足りないときに初めて負荷を
+遮断する。この順序を入れないと「予備力を守るために負荷を遮断する」という
+実運用と逆の解が最適になってしまう（実際、予備力を等式側の硬い制約に
+していた初版にはこの癖があり、外部レビューで指摘された）。手放した量は
+``CommitmentResult.reserve_shortfall_mw`` に返る。
 
 最低運転停止時間の初期条件
 --------------------------
@@ -163,6 +175,12 @@ DEFAULT_VOLL = 1_000_000.0
 #: 選ばせるためのタイブレークである。既定では 1 円/MWh になり、混合整数
 #: 計画の相対ギャップ（1e-4）よりはるかに小さいので最適性の判定を変えない。
 SPILL_PRICE_RATIO = 1e-6
+
+#: 予備力不足の価格を VOLL に対する比で決める。負荷遮断（VOLL）より安く、
+#: どの号機の燃料費・起動費の按分よりも高い位置に置くことで、
+#: 「予備力は使い切ってから負荷を遮断する」という運用の順序を
+#: 目的関数の価格の順序で表す。
+RESERVE_PENALTY_RATIO = 0.5
 
 #: 全列挙が扱える候補数の上限。これを超えると日本語 ValueError を投げる。
 ENUMERATION_LIMIT = 2 ** 18
@@ -327,7 +345,7 @@ class CommitmentResult:
         号機名 -> ``(T,)`` の 0/1。
     dispatch:
         号機名 -> ``(T,)`` の出力 [MW]。
-    shortfall_mw, spill_mw:
+    shortfall_mw, spill_mw, reserve_shortfall_mw:
         ``(T,)`` の供給不足と出力抑制 [MW]。
     total_cost:
         総費用 [円]。**モデルが最適化した値**、すなわち区分線形近似の費用
@@ -355,6 +373,7 @@ class CommitmentResult:
     dispatch: dict[str, np.ndarray]
     shortfall_mw: np.ndarray
     spill_mw: np.ndarray
+    reserve_shortfall_mw: np.ndarray
     total_cost: float
     cost_breakdown: dict[str, float]
     seconds: float
@@ -421,6 +440,8 @@ class CommitmentResult:
             f"（最大 {self.shortfall_mw.max():.1f} MW）",
             f"  出力抑制   : {self.spill_mw.sum():.1f} MWh"
             f"（最大 {self.spill_mw.max():.1f} MW）",
+            f"  予備力不足 : {self.reserve_shortfall_mw.sum():.1f} MWh"
+            f"（最大 {self.reserve_shortfall_mw.max():.1f} MW）",
             f"  求解時間   : {self.seconds:.3f} s",
         ]
         if self.status != "Optimal":
@@ -620,7 +641,7 @@ def _feasibility_check(units, demand, reserve, *, allow_shortfall: bool) -> None
                 f"  時刻 {t}: 需要 {demand[t]:.1f} MW に対し、起動できる号機の容量は "
                 f"{capacity:.1f} MW（{demand[t] - capacity:.1f} MW 不足）"
             )
-        if headroom < reserve[t] - _TOL_MW:
+        if not allow_shortfall and headroom < reserve[t] - _TOL_MW:
             problems.append(
                 f"  時刻 {t}: 予備力要求 {reserve[t]:.1f} MW に対し、"
                 f"未負荷容量の上限は {headroom:.1f} MW"
@@ -676,6 +697,7 @@ def _build_problem(
     n_segments: int,
     voll: float,
     spill_price: float,
+    reserve_price: float,
     allow_shortfall: bool,
     symmetry_breaking: bool,
     schedule: Sequence[Sequence[float]] | None = None,
@@ -738,6 +760,11 @@ def _build_problem(
         t: solvers.variable(
             f"spill_{t}", 0.0, total_capacity + max(0.0, -float(demand[t]))
         )
+        for t in range(horizon)
+    }
+    # 予備力不足。要求量までしか手放せない（それ以上は意味を持たない）。
+    reserve_short = {
+        t: solvers.variable(f"reserve_short_{t}", 0.0, max(float(reserve[t]), 0.0))
         for t in range(horizon)
     }
 
@@ -825,6 +852,7 @@ def _build_problem(
             solvers.lp_sum(
                 [units[i].p_max_mw * u[i, t] - p[i, t] for i in range(len(units))]
             )
+            + reserve_short[t]
             >= float(reserve[t]),
             f"reserve_{t}",
         )
@@ -847,6 +875,7 @@ def _build_problem(
     for t in range(horizon):
         terms.append(voll * shed[t])
         terms.append(spill_price * spill[t])
+        terms.append(reserve_price * reserve_short[t])
     problem += solvers.lp_sum(terms)
 
     return problem
@@ -877,7 +906,8 @@ def _read_dispatch(units, horizon, solution, schedule) -> list[np.ndarray]:
 
 
 def _cost_breakdown(
-    units, schedule, dispatch, shortfall, spill, *, n_segments, voll, spill_price
+    units, schedule, dispatch, shortfall, spill, reserve_short,
+    *, n_segments, voll, spill_price, reserve_price
 ) -> dict[str, float]:
     """入切と出力から費用の内訳を **数え直す** [円]。
 
@@ -895,7 +925,11 @@ def _cost_breakdown(
         for t in range(u.size):
             if u[t] > 0.5:
                 fuel += _piecewise_cost(unit, float(p[t]), n_segments)
-    penalty = voll * float(np.sum(shortfall)) + spill_price * float(np.sum(spill))
+    penalty = (
+        voll * float(np.sum(shortfall))
+        + spill_price * float(np.sum(spill))
+        + reserve_price * float(np.sum(reserve_short))
+    )
     return {"fuel": fuel, "noload": noload, "startup": startup, "penalty": penalty}
 
 
@@ -937,7 +971,9 @@ def unit_commitment(
         供給不足 ``shed`` を許すか。既定は ``True``。``False`` にすると
         供給力が足りない時刻がある場合に日本語の :class:`ValueError` になる。
     voll:
-        供給支障費用 [円/MWh]。``shed`` に掛かる。
+        供給支障費用 [円/MWh]。``shed`` に掛かる。予備力不足には
+        この半分の価格が掛かる（:data:`RESERVE_PENALTY_RATIO`。
+        「予備力は使い切ってから負荷を遮断する」順序を作るため）。
     time_limit, gap:
         ソルバの打ち切り時間 [s] と相対ギャップ。既定のギャップ 1e-4 は
         「最適値から 0.01% 以内」の意味で、**総費用を厳密に比較したい
@@ -987,6 +1023,7 @@ def unit_commitment(
     units = data["units"]
     demand, reserve = data["demand"], data["reserve"]
     spill_price = voll * SPILL_PRICE_RATIO
+    reserve_price = voll * RESERVE_PENALTY_RATIO
     _feasibility_check(units, demand, reserve, allow_shortfall=allow_shortfall)
 
     problem = _build_problem(
@@ -996,6 +1033,7 @@ def unit_commitment(
         n_segments=n_segments,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=allow_shortfall,
         symmetry_breaking=symmetry_breaking,
         name="unit_commitment",
@@ -1013,8 +1051,12 @@ def unit_commitment(
     dispatch = _read_dispatch(units, horizon, solution, schedule)
     shortfall = np.array([solution.values[f"shed_{t}"] for t in range(horizon)])
     spill = np.array([solution.values[f"spill_{t}"] for t in range(horizon)])
+    reserve_short = np.array(
+        [solution.values[f"reserve_short_{t}"] for t in range(horizon)]
+    )
     shortfall = np.where(np.abs(shortfall) < _TOL_MW, 0.0, shortfall)
     spill = np.where(np.abs(spill) < _TOL_MW, 0.0, spill)
+    reserve_short = np.where(np.abs(reserve_short) < _TOL_MW, 0.0, reserve_short)
 
     return _result(
         case,
@@ -1024,6 +1066,7 @@ def unit_commitment(
         dispatch,
         shortfall,
         spill,
+        reserve_short,
         status=solution.status,
         total_cost=float(solution.objective),
         seconds=solution.seconds,
@@ -1031,6 +1074,7 @@ def unit_commitment(
         n_segments=n_segments,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=allow_shortfall,
         symmetry_breaking=symmetry_breaking,
         vre_mw=vre_mw,
@@ -1045,6 +1089,7 @@ def _result(
     dispatch,
     shortfall,
     spill,
+    reserve_short,
     *,
     status,
     total_cost,
@@ -1053,6 +1098,7 @@ def _result(
     n_segments,
     voll,
     spill_price,
+    reserve_price,
     allow_shortfall,
     symmetry_breaking,
     vre_mw,
@@ -1064,9 +1110,11 @@ def _result(
         dispatch,
         shortfall,
         spill,
+        reserve_short,
         n_segments=n_segments,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
     )
     return CommitmentResult(
         case=case,
@@ -1076,6 +1124,7 @@ def _result(
         dispatch={unit.name: dispatch[i] for i, unit in enumerate(units)},
         shortfall_mw=np.asarray(shortfall, dtype=float),
         spill_mw=np.asarray(spill, dtype=float),
+        reserve_shortfall_mw=np.asarray(reserve_short, dtype=float),
         total_cost=float(total_cost),
         cost_breakdown=breakdown,
         seconds=float(seconds),
@@ -1089,6 +1138,7 @@ def _result(
             "n_segments": int(n_segments),
             "voll": float(voll),
             "spill_price": float(spill_price),
+            "reserve_price": float(reserve_price),
             "allow_shortfall": bool(allow_shortfall),
             "symmetry_breaking": bool(symmetry_breaking),
             "unit_names": tuple(unit.name for unit in units),
@@ -1184,6 +1234,7 @@ def priority_list(
     schedule = _priority_schedule(units, demand, reserve)
     voll = DEFAULT_VOLL
     spill_price = voll * SPILL_PRICE_RATIO
+    reserve_price = voll * RESERVE_PENALTY_RATIO
     problem = _build_problem(
         units,
         demand,
@@ -1191,6 +1242,7 @@ def priority_list(
         n_segments=DEFAULT_SEGMENTS,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=True,
         symmetry_breaking=False,
         schedule=schedule,
@@ -1205,11 +1257,15 @@ def priority_list(
     dispatch = _read_dispatch(units, horizon, solution, schedule)
     shortfall = np.array([solution.values[f"shed_{t}"] for t in range(horizon)])
     spill = np.array([solution.values[f"spill_{t}"] for t in range(horizon)])
+    reserve_short = np.array(
+        [solution.values[f"reserve_short_{t}"] for t in range(horizon)]
+    )
     shortfall = np.where(np.abs(shortfall) < _TOL_MW, 0.0, shortfall)
     spill = np.where(np.abs(spill) < _TOL_MW, 0.0, spill)
+    reserve_short = np.where(np.abs(reserve_short) < _TOL_MW, 0.0, reserve_short)
 
     return _result(
-        case, data, units, schedule, dispatch, shortfall, spill,
+        case, data, units, schedule, dispatch, shortfall, spill, reserve_short,
         status=solution.status,
         total_cost=float(solution.objective),
         seconds=seconds,
@@ -1217,6 +1273,7 @@ def priority_list(
         n_segments=DEFAULT_SEGMENTS,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=True,
         symmetry_breaking=False,
         vre_mw=vre_mw,
@@ -1258,7 +1315,7 @@ def _feasible_schedules(unit: Unit, horizon: int) -> list[tuple[int, ...]]:
 
 
 def _hour_dispatch(units, segments, on, previous, following, demand, reserve,
-                   *, voll, spill_price):
+                   *, voll, spill_price, reserve_price):
     """1 時刻の最小費用配分を貪欲法で解く。
 
     入切が決まっていて **ランプ率が拘束しない**なら、各時刻は独立に解ける。
@@ -1272,8 +1329,10 @@ def _hour_dispatch(units, segments, on, previous, following, demand, reserve,
     Returns
     -------
     tuple | None
-        ``(費用, 出力配列, 供給不足, 出力抑制)``。この入切では実行不可能な
-        ときは ``None``（予備力が確保できない、など）。
+        ``(費用, 出力配列, 供給不足, 出力抑制, 予備力不足)``。この入切では
+        実行不可能なとき（起動時到達出力が最低出力を下回る等）は ``None``。
+        予備力は不足しても実行不可能にはならず、MILP と同じ価格順序で
+        ``reserve_price`` を払って手放す。
     """
     count = len(units)
     low = np.zeros(count)
@@ -1297,13 +1356,16 @@ def _hour_dispatch(units, segments, on, previous, following, demand, reserve,
         high[i] = max(upper, unit.p_min_mw)
 
     total_low = float(low.sum())
-    total_high = min(float(high.sum()), capacity - float(reserve))
-    if total_high < total_low - _TOL_MW:
-        return None                                    # 予備力が確保できない
+    total_high = float(high.sum())
 
     target = min(max(float(demand), total_low), total_high)
     shed = max(0.0, float(demand) - total_high)
     spill = max(0.0, total_low - float(demand))
+    # 予備力は使い切ってから負荷を遮断する（MILP と同じ価格順序）。
+    # 出力が capacity - R を超えた分だけ予備力を手放したことになる。
+    reserve_short = min(
+        max(0.0, target - (capacity - float(reserve))), max(float(reserve), 0.0)
+    )
 
     blocks: list[tuple[float, int, float]] = []
     for i, unit in enumerate(units):
@@ -1328,8 +1390,8 @@ def _hour_dispatch(units, segments, on, previous, following, demand, reserve,
         cost += slope * take
         remaining -= take
 
-    cost += voll * shed + spill_price * spill
-    return cost, output, shed, spill
+    cost += voll * shed + spill_price * spill + reserve_price * reserve_short
+    return cost, output, shed, spill, reserve_short
 
 
 def enumerate_commitment(
@@ -1417,6 +1479,7 @@ def enumerate_commitment(
     segments = [_segments(unit, DEFAULT_SEGMENTS) for unit in unit_list]
     voll = DEFAULT_VOLL
     spill_price = voll * SPILL_PRICE_RATIO
+    reserve_price = voll * RESERVE_PENALTY_RATIO
     initial_mask = sum(1 << i for i, unit in enumerate(unit_list) if unit.u0)
     cache: dict[tuple[int, int, int, int], float | None] = {}
 
@@ -1426,7 +1489,8 @@ def enumerate_commitment(
             outcome = _hour_dispatch(
                 unit_list, segments, on, previous,
                 None if following < 0 else following,
-                demand[t], reserve[t], voll=voll, spill_price=spill_price,
+                demand[t], reserve[t],
+                voll=voll, spill_price=spill_price, reserve_price=reserve_price,
             )
             cache[key] = None if outcome is None else outcome[0]
         return cache[key]
@@ -1475,21 +1539,24 @@ def enumerate_commitment(
     dispatch = [np.zeros(horizon) for _ in range(count)]
     shortfall = np.zeros(horizon)
     spill = np.zeros(horizon)
+    reserve_short = np.zeros(horizon)
     for t in range(horizon):
         outcome = _hour_dispatch(
             unit_list, segments, best_masks[t],
             best_masks[t - 1] if t > 0 else initial_mask,
             best_masks[t + 1] if t + 1 < horizon else None,
-            demand[t], reserve[t], voll=voll, spill_price=spill_price,
+            demand[t], reserve[t],
+            voll=voll, spill_price=spill_price, reserve_price=reserve_price,
         )
-        _cost, output, shed_t, spill_t = outcome
+        _cost, output, shed_t, spill_t, rs_t = outcome
         for i in range(count):
             dispatch[i][t] = output[i]
         shortfall[t] = shed_t
         spill[t] = spill_t
+        reserve_short[t] = rs_t
 
     return _result(
-        case, data, unit_list, schedule, dispatch, shortfall, spill,
+        case, data, unit_list, schedule, dispatch, shortfall, spill, reserve_short,
         status="Optimal",
         total_cost=best_cost,
         seconds=seconds,
@@ -1497,6 +1564,7 @@ def enumerate_commitment(
         n_segments=DEFAULT_SEGMENTS,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=True,
         symmetry_breaking=False,
         vre_mw=vre_mw,
@@ -1556,6 +1624,9 @@ def marginal_prices(case: Case, result: CommitmentResult) -> np.ndarray:
     n_segments = int(options.get("n_segments", DEFAULT_SEGMENTS))
     voll = float(options.get("voll", DEFAULT_VOLL))
     spill_price = float(options.get("spill_price", voll * SPILL_PRICE_RATIO))
+    reserve_price = float(
+        options.get("reserve_price", voll * RESERVE_PENALTY_RATIO)
+    )
 
     problem = _build_problem(
         units,
@@ -1564,6 +1635,7 @@ def marginal_prices(case: Case, result: CommitmentResult) -> np.ndarray:
         n_segments=n_segments,
         voll=voll,
         spill_price=spill_price,
+        reserve_price=reserve_price,
         allow_shortfall=bool(options.get("allow_shortfall", True)),
         symmetry_breaking=False,
         schedule=schedule,

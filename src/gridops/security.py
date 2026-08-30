@@ -96,7 +96,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from . import solvers
-from .case import Case, Unit
+from .case import Case, Unit, validate_rating_attribute
 from .dc import dc_powerflow, lodf, ptdf
 from .powerflow import PowerFlowSolution
 from .powerflow import solve as solve_powerflow
@@ -174,6 +174,7 @@ def _limit_array(case: Case, limit: str) -> np.ndarray:
             "（rate_a が常時許容容量、rate_b が緊急時許容容量。"
             "N-1 の事故後は rate_b で見るのが規約である）。"
         )
+    validate_rating_attribute(limit)
     rates = np.array([float(getattr(branch, limit)) for branch in case.branches])
     if np.any(rates <= 0.0):
         bad = [
@@ -613,6 +614,15 @@ class SecurityReport:
 
     # ------------------------------------------------------------------
     @property
+    def has_unassessed(self) -> bool:
+        """未評価の想定事故（橋など）が残っているか。
+
+        ``is_secure`` は **評価した事故だけ**の判定である。除外された事故が
+        あるまま「N-1 健全」と結論しないよう、まずここを確かめること。
+        """
+        return bool(self.skipped)
+
+    @property
     def is_secure(self) -> bool:
         """評価したすべての事故で健全か。
 
@@ -958,6 +968,14 @@ def screen_n1(
         else:
             kept.append(key)
 
+    if not kept:
+        details = "\n".join(f"  - {k}: {reason[:40]}…" for k, reason in skipped)
+        raise ValueError(
+            "評価できる想定事故が 1 件もない。候補が空か、すべて橋である。\n"
+            + (details or "  （候補そのものが空）")
+            + "\n  contingencies に評価したい枝を指定すること。"
+        )
+
     # --- 第 1 段: 直流スクリーニング（method="lodf" のときだけ）--------
     screening: dict[tuple[int, int], np.ndarray] = {}
     if method == "lodf" and kept:
@@ -1071,6 +1089,9 @@ def _evaluate_ac(
     try:
         solution = solve_powerflow(outaged, dispatch=dispatch)
     except RuntimeError:
+        # 未収束は「この定式化・初期値・ソルバでは事故後の定常状態を
+        # 確認できない」ことを意味する。解の不存在の証明ではないが、
+        # 確認できない以上、安全側に不合格として返す。
         zeros = np.zeros(len(keys))
         return ContingencyResult(
             outage=key,

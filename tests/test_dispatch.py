@@ -925,3 +925,49 @@ def test_a_case_without_units_is_reported_in_japanese():
         economic_dispatch(empty, 10.0)
     with pytest.raises(ValueError, match="号機がない"):
         merit_order(empty)
+
+
+# ======================================================================
+# 外部レビュー（2026-08-30）の回帰
+# ======================================================================
+def test_dc_opf_rejects_non_rating_limit_attributes(wscc9):
+    """``limit`` に熱容量でない Branch 属性を渡すと即座に止まること。
+
+    外部レビューの指摘 #2。``hasattr`` だけの検査だと ``limit="x"`` が
+    リアクタンスを送電容量と解釈し、実行可能なら「もっともらしい誤答」を
+    静かに返す。名前を入口で検査する。
+    """
+    for bogus in ("x", "tap", "shift_deg", "r"):
+        with pytest.raises(ValueError, match="許容容量ではない"):
+            dc_opf(wscc9, limit=bogus)
+
+
+def test_congestion_rent_matches_between_methods_with_parallel_lines():
+    """並列 2 回線の片方だけが拘束しても、price 法と shadow 法が一致すること。
+
+    外部レビューの指摘 #7。混雑価格を ``Branch.key()`` で合算すると、
+    拘束していない側の回線の容量にまで価格が掛かり、shadow 法のレントが
+    二重計上される（この構成では 6.4M 円/h と誤答していた。正しくは
+    価格差法と同じ 2.4M 円/h）。
+    """
+    from gridops.case import Bus, BusType, Branch, Case, Unit
+
+    parallel = Case(
+        name="parallel-circuit",
+        base_mva=100.0,
+        buses=[Bus(id=1, type=BusType.SLACK), Bus(id=2, type=BusType.PQ, pd=0.8)],
+        branches=[
+            Branch(from_bus=1, to_bus=2, x=0.1, rate_a=0.30),
+            Branch(from_bus=1, to_bus=2, x=0.1, rate_a=0.50),
+        ],
+        units=[
+            Unit(name="cheap", bus=1, p_max_mw=200.0, var_cost=10_000.0),
+            Unit(name="dear", bus=2, p_max_mw=200.0, var_cost=50_000.0),
+        ],
+    )
+    result = dc_opf(parallel)
+    price = result.congestion_rent(method="price")
+    shadow = result.congestion_rent(method="shadow")
+    assert result.is_congested()
+    assert price == pytest.approx(2_400_000.0, rel=1e-9)
+    assert shadow == pytest.approx(price, rel=1e-9)

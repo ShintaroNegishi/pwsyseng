@@ -221,14 +221,17 @@ def verify_result(
             assert output[0] <= unit.su_ramp * commitment[0] + tol, f"{unit.name} 起動時"
 
     # --- 運転予備力 ----------------------------------------------------
+    # 予備力はソフト制約であり、足りない分は reserve_shortfall_mw に
+    # **明示されて**いなければならない（黙って破るのは許さない）。
     required = reserve_rate * np.maximum(result.demand_mw, 0.0)
     unloaded = np.zeros(horizon)
     for unit in units:
         unloaded = unloaded + unit.p_max_mw * result.schedule[unit.name] \
             - result.dispatch[unit.name]
-    assert np.all(unloaded >= required - tol), (
-        f"予備力が不足: {unloaded - required}"
-    )
+    assert np.all(result.reserve_shortfall_mw >= -tol)
+    assert np.all(
+        unloaded + result.reserve_shortfall_mw >= required - tol
+    ), f"予備力が黙って不足: {unloaded + result.reserve_shortfall_mw - required}"
     assert np.allclose(unloaded, result.reserve_mw(), atol=tol)
 
 
@@ -423,22 +426,59 @@ def test_priority_list_solution_satisfies_every_constraint(case, summer):
     verify_result(result, reserve_rate=case.commitment["reserve_rate"])
 
 
-def test_reserve_is_unloaded_synchronised_capacity(case):
-    """予備力が Σ(Pmax u - p) であって Σ Pmax u >= (1+r)D ではないこと。
+def test_reserve_is_depleted_before_load_is_shed(case):
+    """供給力が尽きるときは予備力を先に手放し、不足分だけを遮断すること。
 
-    需要を極端に大きくすると供給不足が立つ。このとき同期並列容量は
-    ``(1+r) D`` にまったく届かないが、**出していない容量**としての予備力は
-    要求を満たしている。2 つの書き方が別物であることの実例である。
+    予備力を硬い制約にした初版は「予備力を守るために負荷を遮断する」
+    という実運用と逆の解を返していた（外部レビューの指摘 #1）。
+    価格の順序 燃料費 ≪ 予備力不足 < VOLL がこれを防ぐ。
+    需要 2.5 倍では全号機を全出力にしても足りないので、
+    (a) 予備力は毎時刻手放され（reserve_shortfall > 0）、
+    (b) それでも足りない分だけが遮断され、
+    (c) ソフト化した制約は不足分込みで常に閉じている。
     """
     demand = demand_profile(case) * 2.5
     result = unit_commitment(case, demand)
     rate = case.commitment["reserve_rate"]
     committed = np.array([result.committed_mw(t) for t in range(len(demand))])
+    required = np.asarray(result.options["reserve_mw"], dtype=float)
+
+    supplied = sum(result.dispatch[u.name] for u in case.units)
 
     assert np.all(result.shortfall_mw > 0.0)
+    assert result.reserve_shortfall_mw.sum() > 0.0
     assert np.all(committed < (1.0 + rate) * result.demand_mw)      # 素朴な式なら実行不可能
-    assert np.all(result.reserve_mw() >= rate * result.demand_mw - 1e-6)
-    verify_result(result, reserve_rate=rate)
+    assert np.all(
+        result.reserve_mw() + result.reserve_shortfall_mw >= required - 1e-6
+    )
+    # 手放す量は「出力が (同期並列容量 - 予備力要求) を超えた分」だけ。
+    # 起動時刻はランプ制約で出力が伸びず、手放す必要がない時刻もある。
+    expected_rs = np.minimum(required, np.maximum(0.0, supplied - (committed - required)))
+    assert np.allclose(result.reserve_shortfall_mw, expected_rs, atol=1e-6)
+    # 遮断は「供給できなかった」分に一致する（起動時刻はランプ制約で
+    # 同期並列容量まで出せないので、demand - committed とは一致しない）。
+    assert np.allclose(result.shortfall_mw, result.demand_mw - supplied, atol=1e-6)
+
+
+def test_one_unit_serves_demand_before_keeping_reserve():
+    """1 号機・需要=容量のとき、負荷を遮断せず予備力を手放すこと。
+
+    外部レビュー指摘 #1 の最小再現。旧定式化は p=90, shed=10 を返した。
+    """
+    from gridops.case import Bus, BusType
+
+    case1 = Case(
+        name="one-unit",
+        buses=[Bus(id=1, type=BusType.SLACK)],
+        branches=[],
+        units=[Unit(name="U1", bus=1, p_max_mw=100.0, p_min_mw=0.0,
+                    var_cost=10_000.0, u0=1)],
+    )
+    result = unit_commitment(case1, np.array([100.0]), reserve_rate=0.10)
+    assert result.dispatch["U1"][0] == pytest.approx(100.0, abs=1e-6)
+    assert result.shortfall_mw[0] == pytest.approx(0.0, abs=1e-6)
+    assert result.reserve_shortfall_mw[0] == pytest.approx(10.0, abs=1e-6)
+    verify_result(result, reserve_rate=0.10)
 
 
 # ======================================================================
@@ -606,13 +646,17 @@ def test_extreme_demand_produces_shortfall(case):
 
     assert result.status == "Optimal"
     assert np.all(result.shortfall_mw > 0.0)
+    reserve_price = float(result.options["reserve_price"])
     assert result.cost_breakdown["penalty"] == pytest.approx(
-        DEFAULT_VOLL * result.shortfall_mw.sum(), rel=1e-9
+        DEFAULT_VOLL * result.shortfall_mw.sum()
+        + reserve_price * result.reserve_shortfall_mw.sum(),
+        rel=1e-9,
     )
     # 「12 時に何 MW 足りないか」が読める形になっていること。
+    # 予備力は先に全量手放しているので、不足 = 需要 - 同期並列容量。
     worst = int(np.argmax(result.shortfall_mw))
     assert result.shortfall_mw[worst] == pytest.approx(
-        demand[worst] - result.committed_mw(worst) + result.reserve_mw()[worst], abs=1e-6
+        demand[worst] - result.committed_mw(worst), abs=1e-6
     )
 
 
@@ -626,9 +670,20 @@ def test_shortfall_can_be_forbidden_with_japanese_error(case):
 
 
 def test_reserve_requirement_beyond_capacity_is_diagnosed(case):
-    """予備力要求が原理的に満たせないとき、その旨を日本語で言うこと。"""
+    """予備力要求が原理的に満たせないときの挙動。
+
+    ``allow_shortfall=False`` なら解く前に日本語で止まる。既定
+    （``True``）では止まらず、満たせない分が ``reserve_shortfall_mw`` に
+    出る（授業を止めないための緩和変数と同じ思想）。
+    """
     with pytest.raises(ValueError, match="未負荷容量の上限"):
-        unit_commitment(case, demand_profile(case), reserve_rate=1.5)
+        unit_commitment(
+            case, demand_profile(case), reserve_rate=1.5, allow_shortfall=False
+        )
+    relaxed = unit_commitment(case, demand_profile(case), reserve_rate=1.5)
+    assert relaxed.status == "Optimal"
+    assert relaxed.reserve_shortfall_mw.sum() > 0.0
+    assert relaxed.shortfall_mw.sum() == pytest.approx(0.0, abs=1e-6)
 
 
 # ======================================================================

@@ -120,6 +120,16 @@ def build(source_path: Path, *, with_solutions: bool) -> nbformat.NotebookNode:
     cells = parse_percent_format(text)
     validate_heading(source_path, cells)
 
+    # 解答ブロックはコードセル専用。Markdown セルに置くと strip_solutions が
+    # 通らず、穴埋め版に解答がそのまま残る（外部レビューの指摘 #9）。
+    for kind, content in cells:
+        if kind == "markdown" and SOLUTION_BEGIN in content:
+            raise ValueError(
+                f"{source_path}: Markdown セルに {SOLUTION_BEGIN} がある。"
+                "解答ブロックはコードセルにだけ置けること。"
+                "Markdown の模範解答はマーカーなしで書くこと。"
+            )
+
     notebook = nbformat.v4.new_notebook()
     notebook.metadata["kernelspec"] = {
         "display_name": "Python 3 (pwsyseng)",

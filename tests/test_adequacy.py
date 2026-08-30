@@ -675,3 +675,35 @@ def test_summaries_are_readable(case, copt, stressed_load):
     result = monte_carlo_adequacy(case.units, stressed_load, n_samples=5_000, seed=0)
     report = result.summary()
     assert "LOLP" in report and "95% CI" in report
+
+
+# ======================================================================
+# 外部レビュー（2026-08-30）の回帰
+# ======================================================================
+def test_zero_event_interval_does_not_claim_certainty():
+    """供給支障 0 件の信頼区間が ``(0, 0)`` にならないこと。
+
+    外部レビューの指摘 #5。Wald 区間（正規近似）は 0 件のとき幅ゼロと
+    なり「真の LOLP は確実にゼロ」という誤った断定になる。Wilson 区間は
+    0 件でも上限 :math:`\\approx z^2/(N+z^2)` を残す。
+    """
+    from gridops.adequacy import MonteCarloResult
+
+    result = MonteCarloResult(
+        lolp=0.0, eue=0.0, n_samples=10_000, lolp_stderr=0.0, eue_stderr=0.0
+    )
+    low, high = result.lolp_interval()
+    assert low == 0.0
+    assert high > 0.0
+    assert high == pytest.approx(1.96 ** 2 / (10_000 + 1.96 ** 2), rel=1e-3)
+
+
+def test_wilson_interval_still_contains_the_analytic_answer():
+    """Wilson 区間でも「解析解を含む」検証がそのまま成り立つこと。"""
+    units = [_unit(f"U{i}", 50.0, 0.05) for i in range(4)]
+    copt = capacity_outage_table(units)
+    load = np.full(200, 130.0)
+    analytic = lolp(copt, copt.installed_mw - (copt.installed_mw - 130.0))
+    result = monte_carlo_adequacy(units, load, n_samples=20_000, seed=3)
+    low, high = result.lolp_interval()
+    assert low <= analytic <= high

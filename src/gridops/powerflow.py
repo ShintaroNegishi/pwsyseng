@@ -87,7 +87,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from .case import BusType, Case
+from .case import BusType, Case, validate_rating_attribute
 from .ybus import build_ybus, islands
 
 __all__ = [
@@ -417,7 +417,7 @@ class PowerFlowSolution:
         result: dict[tuple[int, int], float] = {}
         for branch, (s_ft, s_tf) in zip(self.case.branches, self._branch_powers()):
             magnitude = float(max(abs(s_ft), abs(s_tf)))
-            rating = float(getattr(branch, limit))
+            rating = float(getattr(branch, validate_rating_attribute(limit)))
             if not math.isfinite(rating):
                 result[branch.key()] = 0.0
             elif rating <= 0.0:

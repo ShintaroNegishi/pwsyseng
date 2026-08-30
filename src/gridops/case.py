@@ -68,6 +68,27 @@ BLOCK_LESSONS = {
 }
 
 
+#: 枝の許容容量として指定できる属性名。これ以外（``x`` や ``tap`` など）を
+#: 容量として使うと、もっともらしいが無意味な潮流制約になる。
+RATING_ATTRIBUTES = ("rate_a", "rate_b")
+
+
+def validate_rating_attribute(limit: str) -> str:
+    """``limit`` が枝の許容容量の属性名であることを確かめて返す。
+
+    ``getattr(branch, limit)`` で読む実装は、放っておくと ``x`` や ``tap``
+    のような **容量でない属性**も受け取れてしまう。その場合エラーには
+    ならず、リアクタンスを送電容量と解釈した「もっともらしい誤答」が
+    返る（外部レビューの指摘 #2）。入口で名前を検査して防ぐ。
+    """
+    if limit not in RATING_ATTRIBUTES:
+        raise ValueError(
+            f"limit={limit!r} は枝の許容容量ではない。"
+            f"使えるのは {RATING_ATTRIBUTES}（常時 / 緊急時）。"
+        )
+    return limit
+
+
 class BusType(Enum):
     """母線の種別。未知数と方程式の対応を決める。
 
@@ -249,9 +270,9 @@ class Unit:
     mttr: float | None = None        #: 平均修復時間 [h]（同上）
 
     # --- 安定度（genstab へ渡す）---------------------------------------
-    h: float | None = None          #: 慣性定数 [s]
+    h: float | None = None          #: 慣性の寄与分 [s]（系統共通基準に換算済み。単純加算できる）
     xd_prime: float | None = None   #: 過渡リアクタンス [p.u.]
-    d: float = 0.0                  #: 制動係数 [p.u.]
+    d: float = 0.0                  #: 制動の寄与分 [p.u.]（同上。機器容量基準の値を入れないこと）
 
     # ------------------------------------------------------------------
     @property
@@ -471,6 +492,12 @@ class Case:
                 problems.append(f"号機 {unit.name}: p_min_mw > p_max_mw")
             if unit.q_min > unit.q_max:
                 problems.append(f"号機 {unit.name}: q_min > q_max")
+            if unit.quadratic < 0.0:
+                problems.append(
+                    f"号機 {unit.name}: 燃料費の 2 次係数が負 "
+                    f"(quadratic={unit.quadratic})。費用が凹になり、"
+                    "等 λ 法の単調性と区分線形化の前提（凸性）が崩れる。"
+                )
             if not 0.0 <= unit.forced_outage_rate <= 1.0:
                 problems.append(f"号機 {unit.name}: FOR が [0, 1] の外")
             if unit.min_up < 1 or unit.min_down < 1:

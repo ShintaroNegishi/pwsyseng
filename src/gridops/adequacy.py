@@ -671,16 +671,30 @@ class MonteCarloResult:
         モンテカルロの答え合わせは **点推定の一致では書けない**。標本ごとに
         値が動くのが正しい振る舞いだからである。「解析解がこの区間に入るか」
         で検証すること（本モジュールのテストがその形になっている）。
-        正規近似なので、不足がほとんど起きない系統（:math:`Np < 10` 程度）
-        では区間が信用できない。そのときは標本数を増やすしかない。
+
+        区間は **Wilson 信頼区間**で作る。素朴な正規近似（Wald 区間）
+        :math:`\\hat p \\pm z\\sqrt{\\hat p(1-\\hat p)/N}` は、供給支障が
+        1 件も観測されなかったとき幅ゼロの ``(0, 0)`` を返し、「真の LOLP は
+        確実にゼロ」という誤った断定になる（外部レビューの指摘 #5）。
+        Wilson 区間は 0 件でも上限 :math:`\\approx z^2/(N+z^2)` が残り、
+        「観測されなかっただけ」を正しく表す。稀な事象
+        （:math:`Np < 10` 程度）では、どの区間でも標本数を増やすのが本筋。
         """
         if not 0.0 < level < 1.0:
             raise ValueError(
                 f"level={level} が (0, 1) の外にある。95% 信頼区間なら 0.95。"
             )
         z = NormalDist().inv_cdf(0.5 + level / 2.0)
-        half_width = z * self.lolp_stderr
-        return (max(0.0, self.lolp - half_width), min(1.0, self.lolp + half_width))
+        n = float(self.n_samples)
+        p_hat = float(self.lolp)
+        denominator = 1.0 + z * z / n
+        centre = (p_hat + z * z / (2.0 * n)) / denominator
+        half_width = (
+            z
+            * math.sqrt(p_hat * (1.0 - p_hat) / n + z * z / (4.0 * n * n))
+            / denominator
+        )
+        return (max(0.0, centre - half_width), min(1.0, centre + half_width))
 
     def coefficient_of_variation(self) -> float:
         """変動係数 :math:`\\beta = \\sqrt{(1-p)/(pN)}`。

@@ -81,7 +81,7 @@ from typing import Iterable, Mapping, Sequence
 import numpy as np
 
 from . import solvers
-from .case import Branch, BusType, Case, Unit
+from .case import Branch, BusType, Case, Unit, validate_rating_attribute
 from .ybus import build_ybus, incidence_matrix
 
 __all__ = [
@@ -1036,6 +1036,10 @@ class DCOPFResult:
     #: 以下は契約に無い追加フィールド（既定値付き）。混雑レントを 2 通りで
     #: 計算するには枝の両端と熱容量が要るので、結果に持たせておく。
     case: Case | None = None
+    #: 枝の並び順ごとの混雑価格 [円/MWh]（正で保持）。並列回線は
+    #: :meth:`~gridops.case.Branch.key` が同じになるため、``congestion_price``
+    #: の辞書では区別できない。混雑レントの shadow 法はこちらを使う。
+    congestion_price_per_branch: tuple[float, ...] | None = None
     limit: str = "rate_a"
     loads_mw: dict[int, float] = field(default_factory=dict)
     status: str = "Optimal"
@@ -1096,6 +1100,17 @@ class DCOPFResult:
             return float(total)
         if method == "shadow":
             total = 0.0
+            if self.congestion_price_per_branch is not None:
+                # 枝の並び順ごとの価格を使う。key() で引くと並列回線の
+                # 価格が合算され、拘束していない回線の容量にまで掛かって
+                # レントを二重計上する（外部レビューの指摘 #7）。
+                for k, branch in enumerate(self.case.branches):
+                    price = self.congestion_price_per_branch[k]
+                    if price == 0.0:
+                        continue
+                    cap = getattr(branch, self.limit)
+                    total += price * float(cap) * base
+                return float(total)
             for branch in self.case.branches:
                 price = self.congestion_price.get(branch.key(), 0.0)
                 if price == 0.0:
@@ -1257,7 +1272,7 @@ def dc_opf(
     # --- 線路の熱容量。双対は負で返るので、あとで符号を反転する ----------
     limited: list[int] = []
     for k, branch in enumerate(case.branches):
-        cap = float(getattr(branch, limit))
+        cap = float(getattr(branch, validate_rating_attribute(limit)))
         if not math.isfinite(cap):
             continue
         limited.append(k)
@@ -1284,6 +1299,7 @@ def dc_opf(
     }
 
     congestion: dict[tuple[int, int], float] = {branch.key(): 0.0 for branch in case.branches}
+    per_branch = [0.0] * len(case.branches)
     for k in limited:
         branch = case.branches[k]
         pos = solution.duals.get(
@@ -1295,7 +1311,8 @@ def dc_opf(
         # 最小化問題の '<=' 制約の双対は負である。混雑レントを正の量として
         # 扱うため、ここで符号を反転して足し合わせる（同時に両向きが
         # 拘束することはないので、実際にはどちらか一方だけが非ゼロ）。
-        congestion[branch.key()] += -(pos + neg)
+        per_branch[k] = -(pos + neg)
+        congestion[branch.key()] += per_branch[k]
 
     total_cost = float(sum(unit.var_cost * dispatch[unit.name] for unit in pool))
 
@@ -1311,4 +1328,5 @@ def dc_opf(
         loads_mw=dict(load_mw),
         status=solution.status,
         seconds=solution.seconds,
+        congestion_price_per_branch=tuple(per_branch),
     )

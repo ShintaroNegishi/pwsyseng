@@ -396,3 +396,40 @@ def test_readme_quick_start_actually_runs():
     namespace: dict[str, object] = {}
     exec(compile(match.group(1), "README.md", "exec"), namespace)
     assert namespace["case"].n_bus == 9
+
+
+def test_build_notebooks_rejects_solution_markers_in_markdown(tmp_path):
+    """Markdown セルの解答ブロックを生成段階で拒否すること。
+
+    外部レビューの指摘 #9。``strip_solutions`` はコードセルにしか
+    掛からないので、Markdown に ``# BEGIN SOLUTION`` を置くと穴埋め版に
+    解答がそのまま残る。検査で入口を塞ぐ。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = root / "notebooks" / "src" / "98_markdown_leak.py"
+    source.write_text(
+        "# %% [markdown]\n"
+        "# # 98 テスト\n"
+        "#\n"
+        "# # BEGIN SOLUTION\n"
+        "# 模範解答\n"
+        "# # END SOLUTION\n"
+        "\n"
+        "# %%\n"
+        "import gridops\n",
+        encoding="utf-8",
+    )
+    try:
+        out = _run_tool("build_notebooks.py", "98")
+        assert out.returncode != 0
+        assert "Markdown セル" in (out.stdout + out.stderr)
+        assert not (root / "exercises" / "98_markdown_leak.ipynb").exists()
+    finally:
+        source.unlink(missing_ok=True)
+        for stale in (
+            root / "notebooks" / "98_markdown_leak.ipynb",
+            root / "exercises" / "98_markdown_leak.ipynb",
+        ):
+            stale.unlink(missing_ok=True)
