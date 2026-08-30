@@ -22,14 +22,6 @@ jobs:
           ref: fix/course-material-review-20260830
           fetch-depth: 0
 
-      - name: conda 環境を作る
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          environment-file: environment.yml
-          activate-environment: pwsyseng
-          miniforge-version: latest
-          auto-activate-base: false
-
       - name: 適用スクリプトの曖昧な置換を補正する
         run: |
           python - <<'PY'
@@ -61,12 +53,9 @@ jobs:
           end_marker = 'replace(\n    "docs/solver_notes.md",'
           start = text.index(start_marker)
           end = text.index(end_marker, start)
-          solver_block = '''replace(
+          solver_block = '''sub(
               "src/gridops/solvers.py",
-              "これは実装の手抜きではない。整数変数を含む問題の最適値は右辺について\\n"
-              "区分的に一定な階段関数であり、微分（＝双対）がそもそも存在しない。\\n"
-              "CBC は分枝限定の最後の緩和問題の双対を返してくるが、その値は探索の\\n"
-              "経路に依存し、限界費用としての意味を持たない。",
+              r"これは実装の手抜きではない。.*?限界費用としての意味を持たない。",
               "これは実装の手抜きではない。混合整数計画の整数最適解には、線形計画と同じ意味で\\n"
               "一意に解釈できる影価格を一般には定義できない。連続緩和には双対変数があるが、\\n"
               "それを元の整数問題の限界費用としてそのまま解釈してはならない。CBC が探索中の\\n"
@@ -79,7 +68,17 @@ jobs:
           PY
 
       - name: レビュー修正を適用する
-        run: python tools/_apply_course_review_fixes.py
+        run: |
+          python tools/_apply_course_review_fixes.py
+          git diff --stat
+
+      - name: conda 環境を作る
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pwsyseng
+          miniforge-version: latest
+          auto-activate-base: false
 
       - name: パッケージと notebook を生成する
         run: |
