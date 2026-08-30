@@ -128,6 +128,49 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
+          package_test = Path("tests/test_package.py")
+          text = package_test.read_text(encoding="utf-8")
+          replacements = {
+              "def test_build_notebooks_generates_a_notebook_with_the_gridops_kernel(tmp_path):":
+                  "def test_build_notebooks_generates_a_notebook_with_the_pwsyseng_kernel(tmp_path):",
+              "``tools/build_notebooks.py`` が gridops のカーネル名で notebook を作る。":
+                  "``tools/build_notebooks.py`` が pwsyseng のカーネル名で notebook を作る。",
+              '        "# # 見出し\\n"':
+                  '        "# # 99 パッケージテスト\\n"',
+              '== "Python 3 (gridops)"':
+                  '== "Python 3 (pwsyseng)"',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"tests/test_package.py target not found: {old}")
+              text = text.replace(old, new)
+          package_test.write_text(text, encoding="utf-8")
+
+          security_test = Path("tests/test_security.py")
+          text = security_test.read_text(encoding="utf-8")
+          old = '''def test_default_candidates_come_from_the_case(case: Case, report: SecurityReport) -> None:
+              """既定の候補はケースの ``contingencies`` 層であり、橋は最初から入っていない。"""
+              assert sorted(r.outage for r in report.results) == sorted(case.contingencies)
+              assert report.skipped == []'''
+          new = '''def test_default_candidates_come_from_the_case(case: Case, report: SecurityReport) -> None:
+              """既定の評価対象はケースの候補で、対象外の橋も未評価として記録する。"""
+              assert sorted(r.outage for r in report.results) == sorted(case.contingencies)
+              assert [key for key, _reason in report.skipped] == BRIDGES
+              assert all("未評価" in reason or "適用でき" in reason
+                         for _key, reason in report.skipped)'''
+          if old not in text:
+              raise SystemExit("default-candidate security test block was not found")
+          text = text.replace(old, new, 1)
+          old = "assert len(table.splitlines()) == 3 + len(report.results)"
+          new = "assert len(table.splitlines()) == 3 + len(report.results) + len(report.skipped)"
+          if old not in text:
+              raise SystemExit("security table line-count assertion was not found")
+          text = text.replace(old, new, 1)
+          security_test.write_text(text, encoding="utf-8")
+          PY
+          python - <<'PY'
+          from pathlib import Path
+
           checks = {
               "notebooks/src/18_adequacy.py": ["# # 18 アデカシー", "不足状態にある時間の期待値"],
               "notebooks/src/19_integrated.py": ["# # 19 総合演習"],
