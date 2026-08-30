@@ -1,0 +1,72 @@
+name: apply course-material review fixes
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - fix/course-material-review-20260830
+  workflow_dispatch:
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/course-material-review-20260830
+          fetch-depth: 0
+
+      - name: conda 環境を作る
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: pwsyseng
+          miniforge-version: latest
+          auto-activate-base: false
+
+      - name: レビュー修正を適用する
+        run: python tools/_apply_course_review_fixes.py
+
+      - name: パッケージと notebook を生成する
+        run: |
+          pip install -e .
+          python tools/build_notebooks.py
+          python tools/check_case.py
+
+      - name: テストを実行する
+        run: pytest -q
+
+      - name: 主要 notebook を実行する
+        env:
+          MPLBACKEND: Agg
+          GRIDOPS_FAST: "1"
+        run: |
+          outdir="${RUNNER_TEMP}/review-notebooks"
+          mkdir -p "$outdir"
+          for nb in \
+            notebooks/00_setup.ipynb \
+            notebooks/03_voltage_stability.ipynb \
+            notebooks/06_dc_opf_and_lmp.ipynb \
+            notebooks/07_unit_commitment.ipynb \
+            notebooks/08_reserve_and_vre.ipynb \
+            notebooks/09_security.ipynb \
+            notebooks/14_avr_and_damping.ipynb \
+            notebooks/15_pss_design.ipynb \
+            notebooks/18_adequacy.ipynb \
+            notebooks/19_integrated.ipynb; do
+            jupyter nbconvert --to notebook --execute --output-dir="$outdir" "$nb"
+          done
+
+      - name: 変更をコミットしてブランチへ push する
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: improve course notebooks, terminology, and validation"
+          git push origin HEAD:fix/course-material-review-20260830
