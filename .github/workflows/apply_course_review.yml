@@ -70,6 +70,13 @@ jobs:
           )
           '''
           text = text[:start] + solver_block + text[end:]
+
+          old_yaml_loop = 'for yaml_path in ("cases/wscc9.yaml", "src/gridops/casedata/wscc9.yaml"):'
+          new_yaml_loop = 'for yaml_path in ("src/gridops/casedata/wscc9.yaml",):'
+          if old_yaml_loop not in text:
+              raise SystemExit("YAML inertia loop was not found")
+          text = text.replace(old_yaml_loop, new_yaml_loop, 1)
+
           path.write_text(text, encoding="utf-8")
           PY
 
