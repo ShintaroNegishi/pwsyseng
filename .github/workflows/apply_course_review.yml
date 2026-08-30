@@ -238,5 +238,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
+          git reset -- .github/workflows/tests.yml .github/workflows/apply_course_review.yml tools/_apply_course_review_fixes.py
           git commit -m "fix: improve course notebooks, terminology, and validation"
           git push origin HEAD:fix/course-material-review-20260830
